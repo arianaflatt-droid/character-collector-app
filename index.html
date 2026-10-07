@@ -180,7 +180,7 @@ const $ = s => document.querySelector(s);
 const id = new URLSearchParams(location.search).get("s");
 const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const RANK = { Legendary: 0, Epic: 1, Rare: 2, Common: 3 };
-let student = null, chars = [], pulling = false, current = null; // current = pull being shown in the reveal
+let student = null, chars = [], pulling = false, current = null, pullError = ""; // current = pull being shown in the reveal
 let settings = { xpPerPull: DEFAULT_XP_PER_PULL, roundXp: DEFAULT_ROUND_XP, keepsPerRound: DEFAULT_KEEPS, weights: DEFAULT_WEIGHTS, day: 1 };
 
 function setMsg(t) { $("#msg").hidden = !t; $("#msg").textContent = t || ""; }
@@ -304,7 +304,7 @@ function render() {
   renderTray();
 
   if (!pool.length) { setMsg("Your teacher hasn't turned on any character series for you yet."); $("#binder").innerHTML = ""; return; }
-  setMsg("");
+  setMsg(pullError);
   const groups = (student.enabledSeries || []).filter(s => pool.some(c => c.series === s));
   $("#binder").innerHTML = groups.map(s => {
     const list = pool.filter(c => c.series === s).sort((a, b) => (RANK[a.rarity] - RANK[b.rarity]) || a.name.localeCompare(b.name));
@@ -355,14 +355,17 @@ $("#tray").addEventListener("click", async e => {
 async function doPull() {
   if (pulling || !student) return;
   const pool = poolOf(); if (!pool.length) return;
-  pulling = true; $("#pull").disabled = true;
+  pulling = true; pullError = ""; $("#pull").disabled = true;
   try {
     const pick = pickWeighted(pool, settings.weights);
-    const res = await commitPull(pick);
+    const res = await Promise.race([commitPull(pick), new Promise((_, no) => setTimeout(() => no(new Error("timed-out")), 15000))]);
     showReveal(pick, res);
   } catch (e) {
-    setMsg("That pull didn't go through. Try again in a moment.");
-    setTimeout(() => render(), 2500);
+    console.error(e);
+    const code = e?.code || e?.message || "unknown";
+    pullError = `That pull didn't go through. Tell your teacher this code: ${code}`;
+    toast("That pull didn't go through");
+    setTimeout(() => { pullError = ""; render(); }, 20000);
   } finally { pulling = false; render(); }
 }
 
