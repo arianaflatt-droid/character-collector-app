@@ -47,6 +47,8 @@
 
 
   .btn:disabled{opacity:.45;cursor:not-allowed;box-shadow:none}
+  .daybanner{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;background:var(--sun);border:3px solid var(--ink);border-radius:14px;padding:10px 14px;margin-bottom:20px;font-weight:800;box-shadow:0 4px 0 var(--ink)}
+  .daybanner .btn{padding:6px 14px;box-shadow:0 3px 0 var(--ink)}
   .roundtext{margin:6px 0 0;font-weight:700;color:var(--muted)}
   .trayBox{margin-top:26px;background:#fff8e1;border:3px solid var(--sun);border-radius:18px;padding:16px 18px 20px}
   .trayBox h2{font-size:1.5rem}
@@ -120,6 +122,7 @@
 </script>
 <div class="wrap">
   <main class="page">
+    <div class="daybanner" id="dayBanner" hidden role="status"><span id="dayText"></span><button class="btn alt" id="dayOk">Got it</button></div>
     <section class="hero">
       <div>
         <h1 id="hello">Your binder</h1>
@@ -165,7 +168,7 @@
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script type="module">
-import { db, DEFAULT_WEIGHTS, DEFAULT_XP_PER_PULL, DEFAULT_ROUND_XP, DEFAULT_KEEPS, pullInfo, pickWeighted, esc } from "./common.js";
+import { db, DEFAULT_WEIGHTS, DEFAULT_XP_PER_PULL, DEFAULT_ROUND_XP, DEFAULT_KEEPS, pullInfo, pickWeighted, esc, firstName } from "./common.js";
 import { doc, collection, onSnapshot, runTransaction, increment } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 window.__loaded = true;
@@ -174,7 +177,7 @@ const id = new URLSearchParams(location.search).get("s");
 const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const RANK = { Legendary: 0, Epic: 1, Rare: 2, Common: 3 };
 let student = null, chars = [], pulling = false, current = null; // current = pull being shown in the reveal
-let settings = { xpPerPull: DEFAULT_XP_PER_PULL, roundXp: DEFAULT_ROUND_XP, keepsPerRound: DEFAULT_KEEPS, weights: DEFAULT_WEIGHTS };
+let settings = { xpPerPull: DEFAULT_XP_PER_PULL, roundXp: DEFAULT_ROUND_XP, keepsPerRound: DEFAULT_KEEPS, weights: DEFAULT_WEIGHTS, day: 1 };
 
 function setMsg(t) { $("#msg").hidden = !t; $("#msg").textContent = t || ""; }
 let toastTimer;
@@ -209,7 +212,8 @@ function startListeners() {
       xpPerPull: Number(d.xpPerPull) || DEFAULT_XP_PER_PULL,
       roundXp: Number(d.roundXp) || DEFAULT_ROUND_XP,
       keepsPerRound: d.keepsPerRound === undefined ? DEFAULT_KEEPS : Math.max(0, Number(d.keepsPerRound)),
-      weights: { ...DEFAULT_WEIGHTS, ...(d.weights || {}) }
+      weights: { ...DEFAULT_WEIGHTS, ...(d.weights || {}) },
+      day: Number(d.day) || 1
     };
     render();
   });
@@ -217,14 +221,17 @@ function startListeners() {
 
 // Spend one pull. Earned pulls go to the "keepers" tray to be decided on; teacher bonus pulls go straight into the binder.
 async function commitPull(pick) {
-  const ref = doc(db, "students", id);
+  const ref = doc(db, "students", id), cfgRef = doc(db, "config", "main");
   return await runTransaction(db, async tx => {
     const s = (await tx.get(ref)).data();
+    const day = Number(((await tx.get(cfgRef)).data() || {}).day) || 1;     // today's day number (the teacher bumps it with "Start new day")
     const info = pullInfo(s, settings);
     if (!(s.enabledSeries || []).includes(pick.series)) throw new Error("series off");
     if (info.earned > 0) {
-      const item = { u: Math.random().toString(36).slice(2, 10), id: pick.id, round: Math.floor((s.pullsUsed || 0) / info.ppr) };
-      tx.update(ref, { pullsUsed: increment(1), tray: [...(s.tray || []), item], lastPull: Date.now() });
+      const todayCount = s.pullsDay === day ? (s.pullsToday || 0) : 0;      // pulls made so far today
+      const block = Math.floor(todayCount / info.ppr);                      // each 120 XP worth of pulls is its own round of keeps
+      const item = { u: Math.random().toString(36).slice(2, 10), id: pick.id, day, block, rk: `d${day}b${block}` };
+      tx.update(ref, { pullsUsed: increment(1), pullsDay: day, pullsToday: todayCount + 1, tray: [...(s.tray || []), item], lastPull: Date.now() });
       return { kind: "tray", item, left: info.total - 1 };
     }
     if (info.bonus > 0) {
@@ -241,10 +248,10 @@ async function commitKeep(u) {
     const s = (await tx.get(ref)).data();
     const item = (s.tray || []).find(t => t.u === u);
     if (!item) throw new Error("already decided");
-    const used = (s.keeps || {})["r" + item.round] || 0;
+    const rk = rkOf(item), used = (s.keeps || {})[rk] || 0;
     if (used >= settings.keepsPerRound) throw new Error("round full");
     const have = (s.collection || {})[item.id] || 0;
-    tx.update(ref, { tray: (s.tray || []).filter(t => t.u !== u), ["collection." + item.id]: increment(1), ["keeps.r" + item.round]: increment(1) });
+    tx.update(ref, { tray: (s.tray || []).filter(t => t.u !== u), ["collection." + item.id]: increment(1), ["keeps." + rk]: increment(1) });
     return { isNew: have === 0, count: have + 1 };
   });
 }
@@ -258,18 +265,26 @@ async function commitRelease(u) {
 /*DATA-END*/
 
 const poolOf = () => chars.filter(c => (student.enabledSeries || []).includes(c.series));
-const keptIn = r => (student.keeps || {})["r" + r] || 0;
+const rkOf = t => t.rk || ("r" + t.round);                 // older pulls used "r0", "r1"...
+const keptIn = rk => (student.keeps || {})[rk] || 0;
+const roundNo = t => (t.block !== undefined ? t.block : (t.round || 0)) + 1;
+function roundLabel(t) {
+  if (t.day === undefined) return `Round ${roundNo(t)}`;
+  return t.day === settings.day ? `Today, round ${roundNo(t)}` : `Earlier, round ${roundNo(t)}`;
+}
 
 function render() {
   if (!student) return;
   const xpPer = settings.xpPerPull, K = settings.keepsPerRound, total = student.totalXp || 0, into = total % xpPer;
   const info = pullInfo(student, settings), avail = info.total, pool = poolOf(), coll = student.collection || {};
-  $("#hello").textContent = `Hi, ${student.name}!`;
+  $("#hello").textContent = `Hi, ${firstName(student.name)}!`;
   $("#meterBox").hidden = false;
   $("#fill").style.width = (into / xpPer * 100) + "%";
   $("#meterText").textContent = `${total} XP earned. ${xpPer - into} more XP for your next pull.`;
-  const nextRound = Math.floor((student.pullsUsed || 0) / info.ppr);
-  $("#roundText").textContent = `Round ${nextRound + 1}: keep ${K} of your ${info.ppr} pulls (${keptIn(nextRound)} kept so far)`;
+  const todayCount = student.pullsDay === settings.day ? (student.pullsToday || 0) : 0;
+  const block = Math.floor(todayCount / info.ppr);
+  $("#roundText").textContent = `Today, round ${block + 1}: keep ${K} of your ${info.ppr} pulls (${keptIn(`d${settings.day}b${block}`)} kept so far)`;
+  renderDayBanner(K);
 
   const can = avail > 0 && pool.length > 0;
   $("#packwrap").hidden = false;
@@ -294,11 +309,12 @@ function renderTray() {
   const tray = student.tray || [], K = settings.keepsPerRound;
   $("#trayBox").hidden = !tray.length;
   if (!tray.length) { $("#tray").innerHTML = ""; return; }
-  const rounds = [...new Set(tray.map(t => t.round))].sort((a, b) => a - b);
-  $("#tray").innerHTML = rounds.map(r => {
-    const kept = keptIn(r), full = kept >= K;
-    return `<div class="round"><h3>Round ${r + 1}: ${kept} of ${K} kept${full ? ". This round is full, so release the rest." : ""}</h3><div class="grid">` +
-      tray.filter(t => t.round === r).map(t => {
+  const order = t => (t.day || 0) * 1000 + (t.block !== undefined ? t.block : (t.round || 0));
+  const keys = [...new Set(tray.map(rkOf))].sort((a, b) => order(tray.find(t => rkOf(t) === a)) - order(tray.find(t => rkOf(t) === b)));
+  $("#tray").innerHTML = keys.map(rk => {
+    const items = tray.filter(t => rkOf(t) === rk), kept = keptIn(rk), full = kept >= K;
+    return `<div class="round"><h3>${esc(roundLabel(items[0]))}: ${kept} of ${K} kept${full ? ". This round is full, so release the rest." : ""}</h3><div class="grid">` +
+      items.map(t => {
         const c = chars.find(x => x.id === t.id) || { name: "Missing", rarity: "Common", imageUrl: "" };
         const own = (student.collection || {})[t.id] || 0;
         return `<div class="trayitem" data-u="${esc(t.u)}">${cardHTML(c, 0, false)}
@@ -307,6 +323,15 @@ function renderTray() {
       }).join("") + `</div></div>`;
   }).join("");
 }
+
+// "It's a new day!" banner: shows once per day number on each device, until dismissed
+function renderDayBanner(K) {
+  let seen = null; try { seen = localStorage.getItem("cc-day-" + id); } catch {}
+  const show = settings.day > 1 && seen !== String(settings.day);
+  $("#dayBanner").hidden = !show;
+  if (show) $("#dayText").textContent = `It's a new day! You have a fresh ${K} keeps in every round today.`;
+}
+$("#dayOk").addEventListener("click", () => { try { localStorage.setItem("cc-day-" + id, String(settings.day)); } catch {} $("#dayBanner").hidden = true; });
 
 $("#tray").addEventListener("click", async e => {
   const b = e.target.closest("button"), row = e.target.closest(".trayitem"); if (!b || !row) return;
@@ -341,8 +366,8 @@ function showReveal(c, res) {
   ["kKeep", "kRel", "kLater", "close"].forEach(i => $("#" + i).hidden = true);
   if (res.kind === "tray") {
     current = { u: res.item.u, name: c.name, left: res.left };
-    const kept = keptIn(res.item.round), full = kept >= K, own = (student.collection || {})[c.id] || 0;
-    $("#rMeta").innerHTML = `${esc(c.series)}<br>${own ? `You already have ${own} of these` : "New for your binder!"}<br>Round ${res.item.round + 1}: ${kept} of ${K} kept`;
+    const kept = keptIn(rkOf(res.item)), full = kept >= K, own = (student.collection || {})[c.id] || 0;
+    $("#rMeta").innerHTML = `${esc(c.series)}<br>${own ? `You already have ${own} of these` : "New for your binder!"}<br>${esc(roundLabel(res.item))}: ${kept} of ${K} kept`;
     $("#kKeep").hidden = $("#kRel").hidden = $("#kLater").hidden = false;
     $("#kKeep").disabled = full; $("#kKeep").textContent = full ? "Round full" : "Keep";
     $("#kLater").textContent = res.left > 0 ? `Decide later, pull again (${res.left} left)` : "Decide later";

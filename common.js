@@ -37,3 +37,12 @@ export function pickWeighted(pool, weights) {
 }
 
 export const esc = s => String(s ?? "").replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+
+// "Maya Lopez" -> "Maya", "Lopez, Maya" -> "Maya", "MAYA LOPEZ" -> "Maya"
+export function firstName(full) {
+  let s = String(full ?? "").trim();
+  if (!s) return "";
+  if (s.includes(",")) { const after = s.split(",").slice(1).join(" ").trim(); if (after) s = after; }
+  const f = s.split(/\s+/)[0];
+  return (f === f.toUpperCase() || f === f.toLowerCase()) ? f.charAt(0).toUpperCase() + f.slice(1).toLowerCase() : f;
+}

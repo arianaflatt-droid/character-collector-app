@@ -15,6 +15,7 @@
   header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
   header h1{font-size:1.8rem}
   .who{display:flex;align-items:center;gap:10px;font-weight:700}
+  .who .btn{color:var(--ink)}
   .err{background:#fde8e6;border:2px solid #b3261e;color:#7a1810;border-radius:12px;padding:10px 14px;margin-bottom:14px;font-weight:700}
   .wrap{max-width:1100px;margin:0 auto;padding:18px}
   .tabs{display:flex;gap:8px;margin:0 0 18px;flex-wrap:wrap}
@@ -44,6 +45,9 @@
   .gate input{width:100%;margin:12px 0}
   .status{font-weight:700;min-height:1.3em}
   .w{width:80px}
+  .ptable{border-collapse:collapse;margin:10px 0;font-size:.95rem}
+  .ptable th,.ptable td{border-bottom:1px solid var(--line);padding:4px 14px 4px 0;text-align:left}
+  .pwarn{color:#7a4b00;font-weight:700;margin:4px 0}
 </style>
 </head>
 <body>
@@ -91,6 +95,16 @@
     <!-- STUDENTS -->
     <section id="tab-students">
       <div class="box">
+        <h2>Today</h2>
+        <p id="dayInfo" style="margin:0 0 8px;font-weight:700"></p>
+        <p class="muted" style="margin:0 0 10px">Starting a new day gives every student a fresh set of keeps. Their pulls and what they've already kept stay as they are.</p>
+        <div class="row">
+          <button class="btn" id="newDay">Start new day</button>
+          <label><input type="checkbox" id="dayRelease"> Also release anything students haven't decided on yet</label>
+        </div>
+        <p class="status" id="dayStatus"></p>
+      </div>
+      <div class="box">
         <h2>Add students</h2>
         <div class="row">
           <input type="text" id="newName" placeholder="Student name" aria-label="Student name">
@@ -100,6 +114,25 @@
           <textarea id="bulkNames" placeholder="Or paste a list of names, one per line"></textarea>
         </div>
         <button class="btn alt" id="addMany">Add all names</button>
+      </div>
+
+      <div class="box">
+        <h2>Paste XP for your class</h2>
+        <p class="muted">Copy the rows from your spreadsheet or report and paste them here. The whole class (or even the whole school) can be in there. Only students you've added are updated, and everyone else is ignored.</p>
+        <textarea id="pasteBox" placeholder="Paste here. Include the header row if you have one." aria-label="Pasted XP data"></textarea>
+        <div id="pasteCfg" hidden>
+          <div class="row">
+            <label>Name column <select id="pName"></select></label>
+            <label>XP column <select id="pXp"></select></label>
+            <label>Mode <select id="pMode"><option value="add">Add this number to total XP</option><option value="set">Set total XP to this number</option></select></label>
+          </div>
+          <div id="pasteOut"></div>
+          <div class="row">
+            <button class="btn" id="pasteApply">Apply XP</button>
+            <button class="btn alt" id="pasteClear">Clear</button>
+          </div>
+        </div>
+        <div class="row"><button class="btn alt" id="pasteUndo" hidden>Undo last paste</button><span class="status" id="pasteStatus"></span></div>
       </div>
 
       <div class="box">
@@ -210,18 +243,20 @@
 </div>
 
 <script type="module">
-import { app, db, RARITIES, DEFAULT_WEIGHTS, DEFAULT_XP_PER_PULL, DEFAULT_ROUND_XP, DEFAULT_KEEPS, pullInfo, esc } from "./common.js";
+import { app, db, RARITIES, DEFAULT_WEIGHTS, DEFAULT_XP_PER_PULL, DEFAULT_ROUND_XP, DEFAULT_KEEPS, pullInfo, esc, firstName } from "./common.js";
 import { TEACHER_EMAIL } from "./firebase-config.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { collection, doc, onSnapshot, addDoc, updateDoc, deleteDoc, setDoc, writeBatch, arrayUnion, arrayRemove, increment } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 window.__loaded = true;
 const $ = s => document.querySelector(s);
-let students = [], chars = [], settings = { xpPerPull: DEFAULT_XP_PER_PULL, roundXp: DEFAULT_ROUND_XP, keepsPerRound: DEFAULT_KEEPS, weights: { ...DEFAULT_WEIGHTS } };
+let students = [], chars = [], settings = { xpPerPull: DEFAULT_XP_PER_PULL, roundXp: DEFAULT_ROUND_XP, keepsPerRound: DEFAULT_KEEPS, weights: { ...DEFAULT_WEIGHTS }, day: 1, dayStartedAt: 0 };
 const selected = new Set();
 let parsedRows = [];
+let pasteTable = null, pasteResult = [], lastPaste = null, xpTouched = false;
 
 /* Google sign-in */
+const showErr = () => { $("#fbErr").hidden = false; $("#fbErr").textContent = "Couldn't load your data. Check that the Firestore rules were published and that the email in firebase-config.js matches the account you signed in with."; };
 const auth = getAuth(app);
 let unsubs = [];
 const isTeacher = u => !!(u && u.email && String(u.email).toLowerCase() === String(TEACHER_EMAIL).toLowerCase());
@@ -248,7 +283,6 @@ $("#signin").onclick = async () => {
 };
 $("#signout").onclick = () => signOut(auth);
 $("#gateOut").onclick = () => signOut(auth);
-const showErr = () => { $("#fbErr").hidden = false; $("#fbErr").textContent = "Couldn't load your data. Check that the Firestore rules were published and that the email in firebase-config.js matches the account you signed in with."; };
 
 /* tabs */
 document.querySelectorAll(".tab").forEach(t => t.onclick = () => {
@@ -264,8 +298,8 @@ function start() {
     onSnapshot(collection(db, "characters"), s => { chars = s.docs.map(d => ({ id: d.id, ...d.data() })); renderChars(); renderStudents(); }, showErr),
     onSnapshot(doc(db, "config", "main"), s => {
       const d = s.exists() ? s.data() : {};
-      settings = { xpPerPull: Number(d.xpPerPull) || DEFAULT_XP_PER_PULL, roundXp: Number(d.roundXp) || DEFAULT_ROUND_XP, keepsPerRound: d.keepsPerRound === undefined ? DEFAULT_KEEPS : Math.max(0, Number(d.keepsPerRound)), weights: { ...DEFAULT_WEIGHTS, ...(d.weights || {}) } };
-      renderSettings(); renderStudents();
+      settings = { xpPerPull: Number(d.xpPerPull) || DEFAULT_XP_PER_PULL, roundXp: Number(d.roundXp) || DEFAULT_ROUND_XP, keepsPerRound: d.keepsPerRound === undefined ? DEFAULT_KEEPS : Math.max(0, Number(d.keepsPerRound)), weights: { ...DEFAULT_WEIGHTS, ...(d.weights || {}) }, day: Number(d.day) || 1, dayStartedAt: Number(d.dayStartedAt) || 0 };
+      renderSettings(); renderStudents(); renderDay();
     }, showErr)
   ];
 }
@@ -285,7 +319,7 @@ function renderStudents() {
     return `<div class="srow" data-id="${s.id}">
       <div class="shead">
         <input type="checkbox" class="sel" ${selected.has(s.id) ? "checked" : ""} aria-label="Select ${esc(s.name)}">
-        <strong class="sname">${esc(s.name)}</strong>
+        <strong class="sname">${esc(s.name)}${firstName(s.name) !== s.name ? ` <span class="muted" style="font-weight:600;font-size:.85rem">(page says "Hi, ${esc(firstName(s.name))}!")</span>` : ""}</strong>
         <span class="pulls">${avail} pull${avail === 1 ? "" : "s"} ready${waiting ? ` · ${waiting} to decide` : ""}</span>
         <input type="number" class="xpin" min="0" value="${s.totalXp || 0}" aria-label="Total XP for ${esc(s.name)}">
         <button class="btn setxp">Set XP</button>
@@ -297,6 +331,7 @@ function renderStudents() {
     </div>`;
   }).join("") : '<p class="muted">No students yet.</p>';
   $("#selAll").checked = students.length > 0 && students.every(s => selected.has(s.id));
+  if (pasteTable) previewPaste();
 }
 
 $("#studentList").addEventListener("click", async e => {
@@ -366,6 +401,159 @@ $("#addMany").onclick = async () => {
     await b.commit();
   }
   $("#bulkNames").value = "";
+};
+
+/* new day */
+function renderDay() {
+  const when = settings.dayStartedAt ? new Date(settings.dayStartedAt).toLocaleString([], { weekday: "long", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
+  $("#dayInfo").textContent = `Day ${settings.day}${when ? ` (started ${when})` : ""}`;
+}
+$("#newDay").onclick = async () => {
+  const release = $("#dayRelease").checked;
+  if (!confirm(`Start day ${settings.day + 1}? Everyone gets a fresh ${settings.keepsPerRound} keeps.` + (release ? "\n\nCards students haven't decided on will be released." : ""))) return;
+  try {
+    await setDoc(doc(db, "config", "main"), { day: settings.day + 1, dayStartedAt: Date.now() }, { merge: true });
+    let released = 0;
+    if (release) {
+      const waiting = students.filter(s => (s.tray || []).length);
+      for (let i = 0; i < waiting.length; i += 400) {
+        const b = writeBatch(db);
+        waiting.slice(i, i + 400).forEach(s => { released += s.tray.length; b.update(doc(db, "students", s.id), { tray: [] }); });
+        await b.commit();
+      }
+    }
+    say("#dayStatus", `Day ${settings.day + 1} started.` + (release ? ` Released ${released} undecided card${released === 1 ? "" : "s"}.` : ""));
+  } catch { say("#dayStatus", "That didn't save. Check your connection and try again."); }
+};
+
+/* paste XP */
+const toks = s => norm(String(s).replace(/[,.;:()\[\]"'\u2019\-_/]/g, " ")).split(" ").filter(Boolean);
+const NUM = /^\s*-?\d[\d,]*(\.\d+)?\s*(xp)?\s*$/i;
+const isNum = v => NUM.test(String(v ?? ""));
+const numOf = v => isNum(v) ? Number(String(v).replace(/[^0-9.\-]/g, "")) : NaN;
+function splitLine(line, delim) {
+  if (delim === "\t") return line.split("\t").map(x => x.trim());
+  if (delim === ",") {
+    const out = []; let cur = "", q = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (q) { if (ch === '"' && line[i + 1] === '"') { cur += '"'; i++; } else if (ch === '"') q = false; else cur += ch; }
+      else if (ch === '"') q = true; else if (ch === ",") { out.push(cur.trim()); cur = ""; } else cur += ch;
+    }
+    out.push(cur.trim()); return out;
+  }
+  return line.trim().split(/\s{2,}/).map(x => x.trim());
+}
+// Which of your students does this text belong to? All of the student's name words must appear. The longest name wins.
+function matchStudents(text) {
+  const T = new Set(toks(text)); if (!T.size) return [];
+  const hits = students.filter(s => { const st = toks(s.name); return st.length && st.every(w => T.has(w)); });
+  if (!hits.length) return [];
+  const best = Math.max(...hits.map(s => toks(s.name).length));
+  return hits.filter(s => toks(s.name).length === best);
+}
+const nameText = (r, ni) => ni < 0 ? r.filter(c => !isNum(c)).join(" ") : (r[ni] || "");
+
+function parsePaste() {
+  const lines = $("#pasteBox").value.replace(/\r/g, "").split("\n").filter(l => l.trim());
+  if (!lines.length) { pasteTable = null; $("#pasteCfg").hidden = true; return; }
+  const delim = lines.some(l => l.includes("\t")) ? "\t" : lines.some(l => l.includes(",")) ? "," : "spaces";
+  const rows = lines.map(l => {
+    const parts = splitLine(l, delim);
+    if (delim === "spaces" && parts.length === 1) {            // "Maya Lopez 120" with single spaces
+      const m = l.trim().match(/^(.*?)[\s:=-]+(-?\d[\d,]*(?:\.\d+)?)\s*(?:xp)?$/i);
+      if (m) return [m[1].trim(), m[2]];
+    }
+    return parts;
+  });
+  const width = Math.max(...rows.map(r => r.length));
+  const hasHeader = rows.length > 1 && !rows[0].some(isNum) && rows.slice(1).some(r => r.some(isNum));
+  const labels = Array.from({ length: width }, (_, i) => (hasHeader && rows[0][i]) ? rows[0][i] : `Column ${i + 1}`);
+  const data = hasHeader ? rows.slice(1) : rows;
+  pasteTable = { labels, data, width, hasHeader };
+
+  // auto-pick the name column: whichever one matches the most of your students
+  let bestN = -1, bestScore = -1;
+  for (let c = 0; c < width; c++) { const sc = data.filter(r => matchStudents(nameText(r, c)).length === 1).length; if (sc > bestScore) { bestScore = sc; bestN = c; } }
+  if (bestScore <= 0) bestN = -1;
+  const wholeRow = data.filter(r => matchStudents(nameText(r, -1)).length === 1).length;
+  if (wholeRow > bestScore) bestN = -1;
+  $("#pName").innerHTML = `<option value="-1">Search the whole row</option>` + labels.map((l, i) => `<option value="${i}">${esc(l)}</option>`).join("");
+  $("#pXp").innerHTML = labels.map((l, i) => `<option value="${i}">${esc(l)}</option>`).join("");
+  $("#pName").value = String(bestN);
+  xpTouched = false; pickXpCol();
+  $("#pasteCfg").hidden = false; previewPaste();
+}
+// XP column: a header that says XP. If there are several, "Add" mode prefers a daily one and "Set" mode prefers a total one.
+function pickXpCol() {
+  if (!pasteTable || xpTouched) return;
+  const { labels, data, width, hasHeader } = pasteTable, mode = $("#pMode").value, ni = Number($("#pName").value);
+  let x = -1;
+  if (hasHeader) {
+    const xs = labels.map((l, i) => [l, i]).filter(([l]) => /xp/i.test(l));
+    const total = xs.filter(([l]) => /total|all.?time|lifetime|cumulative/i.test(l)), other = xs.filter(([l]) => !/total|all.?time|lifetime|cumulative/i.test(l));
+    const pick = mode === "set" ? (total[0] || other[0]) : (other[0] || total[0]);
+    if (pick) x = pick[1];
+  }
+  if (x < 0) for (let c = width - 1; c >= 0; c--) { if (c !== ni && data.filter(r => isNum(r[c])).length >= data.length / 2) { x = c; break; } }
+  if (x < 0) x = width - 1;
+  $("#pXp").value = String(x);
+}
+
+function previewPaste() {
+  if (!pasteTable) return;
+  const ni = Number($("#pName").value), xi = Number($("#pXp").value), mode = $("#pMode").value;
+  const by = new Map(); let ignored = 0; const ambiguous = [], dups = new Set();
+  for (const r of pasteTable.data) {
+    const text = nameText(r, ni), hits = matchStudents(text);
+    if (!hits.length) { ignored++; continue; }
+    if (hits.length > 1) { ambiguous.push(text); continue; }
+    const xp = numOf(r[xi]);
+    if (!isFinite(xp)) { ignored++; continue; }
+    const e = by.get(hits[0].id) || { s: hits[0], rows: [] };
+    e.rows.push({ key: toks(text).sort().join(" "), text: text.trim(), xp }); by.set(hits[0].id, e);
+  }
+  for (const [id, e] of [...by]) {
+    const distinct = new Set(e.rows.map(x => x.key));
+    if (distinct.size > 1) { ambiguous.push(`${e.s.name} could be ${[...new Set(e.rows.map(x => x.text))].slice(0, 3).join(" or ")}. Add their full name to your list.`); by.delete(id); continue; }
+    if (e.rows.length > 1) dups.add(e.s.name);
+    e.xp = e.rows[e.rows.length - 1].xp;
+  }
+  pasteResult = [...by.values()].sort((a, b) => a.s.name.localeCompare(b.s.name));
+  const missing = students.filter(s => !by.has(s.id)).map(s => s.name);
+  const newTotal = m => mode === "add" ? (m.s.totalXp || 0) + m.xp : Math.max(0, m.xp);
+  $("#pasteOut").innerHTML =
+    `<p><strong>Found ${pasteResult.length} of your ${students.length} students.</strong> ${ignored} other row${ignored === 1 ? "" : "s"} ignored.</p>` +
+    (pasteResult.length ? `<table class="ptable"><tr><th>Student</th><th>XP now</th><th>${mode === "add" ? "Adding" : "Setting to"}</th><th>New total</th></tr>` +
+      pasteResult.map(m => `<tr><td>${esc(m.s.name)}</td><td>${m.s.totalXp || 0}</td><td>${m.xp}</td><td><strong>${newTotal(m)}</strong></td></tr>`).join("") + `</table>` : "") +
+    (dups.size ? `<p class="pwarn">These students appear more than once, so the last row was used: ${esc([...dups].join(", "))}</p>` : "") +
+    (ambiguous.length ? `<p class="pwarn">Skipped because it was unclear who they are: ${esc(ambiguous.slice(0, 5).join("; "))}</p>` : "") +
+    (missing.length && pasteResult.length ? `<p class="muted">Not found in this paste: ${esc(missing.join(", "))}</p>` : "") +
+    (mode === "add" ? `<p class="muted">Adding stacks onto what they have, so only apply each day's paste once.</p>` : "");
+  $("#pasteApply").disabled = !pasteResult.length;
+}
+$("#pasteBox").addEventListener("input", parsePaste);
+$("#pName").addEventListener("change", () => { pickXpCol(); previewPaste(); });
+$("#pXp").addEventListener("change", () => { xpTouched = true; previewPaste(); });
+$("#pMode").addEventListener("change", () => { pickXpCol(); previewPaste(); });
+$("#pasteClear").onclick = () => { $("#pasteBox").value = ""; parsePaste(); say("#pasteStatus", ""); };
+$("#pasteApply").onclick = async () => {
+  if (!pasteResult.length) return;
+  const mode = $("#pMode").value, b = writeBatch(db); const prev = [];
+  for (const m of pasteResult) {
+    prev.push({ id: m.s.id, name: m.s.name, xp: m.s.totalXp || 0 });
+    b.update(doc(db, "students", m.s.id), { totalXp: mode === "add" ? increment(m.xp) : Math.max(0, m.xp) });
+  }
+  try { await b.commit(); } catch { return say("#pasteStatus", "That didn't save. Check your connection and try again."); }
+  lastPaste = prev; $("#pasteUndo").hidden = false;
+  say("#pasteStatus", `Updated ${prev.length} student${prev.length === 1 ? "" : "s"}.`);
+  $("#pasteBox").value = ""; parsePaste();   // cleared so the same paste can't be applied twice by accident
+};
+$("#pasteUndo").onclick = async () => {
+  if (!lastPaste) return;
+  const b = writeBatch(db); lastPaste.forEach(p => b.update(doc(db, "students", p.id), { totalXp: p.xp }));
+  try { await b.commit(); } catch { return say("#pasteStatus", "Couldn't undo. Try again."); }
+  say("#pasteStatus", `Put ${lastPaste.length} students back to their earlier XP.`); lastPaste = null; $("#pasteUndo").hidden = true;
 };
 
 /* XP spreadsheet */
