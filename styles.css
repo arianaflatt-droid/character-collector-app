@@ -1,0 +1,16 @@
+*{box-sizing:border-box}
+:root{
+  --ink:#1d2147; --paper:#fbf8ff; --binder:#2b2f7a; --binder-hi:#4147b8;
+  --sun:#ffd23f; --mint:#2fbf88; --coral:#ff6f59; --line:#e1dcf2; --muted:#6a6f94;
+  --common:#8a94a6; --rare:#2f80ed; --epic:#a259ff; --legendary:#f5b50a;
+  --display:"Baloo 2",system-ui,sans-serif; --body:"Nunito",system-ui,sans-serif;
+}
+html,body{margin:0}
+body{font-family:var(--body);font-weight:500;color:var(--ink);background:var(--binder);min-height:100vh}
+h1,h2,h3{font-family:var(--display);margin:0;line-height:1.1}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:3px solid var(--sun);outline-offset:2px}
+[hidden]{display:none!important}
+.muted{color:var(--muted)}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}

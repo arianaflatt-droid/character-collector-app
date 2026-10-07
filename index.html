@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>My Character Binder</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;800&family=Nunito:wght@500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<style>
+  .wrap{max-width:1040px;margin:0 auto;padding:18px}
+  .page{position:relative;background:var(--paper);border-radius:22px;padding:28px 28px 36px 64px;box-shadow:0 10px 0 rgba(0,0,0,.18)}
+  .page::before{content:"";position:absolute;left:0;top:0;bottom:0;width:44px;background:radial-gradient(circle,var(--binder) 8px,transparent 9px) 12px 30px/40px 150px repeat-y}
+  .hero{display:grid;grid-template-columns:1fr auto;gap:28px;align-items:center;padding-bottom:26px;border-bottom:3px dashed var(--line)}
+  h1{font-size:clamp(2rem,6vw,3.2rem);font-weight:800}
+  .meter{margin-top:16px;max-width:420px}
+  .track{height:18px;border-radius:999px;background:#e9e4fa;overflow:hidden;border:2px solid var(--ink)}
+  .fill{height:100%;width:0;background:linear-gradient(90deg,var(--mint),var(--sun));transition:width .6s}
+  .meter p{margin:8px 0 0;font-weight:700}
+
+  /* pack */
+  .packwrap{display:flex;flex-direction:column;align-items:center;gap:10px;width:190px}
+  .pack{position:relative;width:100%;background:none;border:0;padding:0;filter:drop-shadow(0 8px 8px rgba(29,33,71,.35));transition:transform .15s,filter .15s}
+  .pack img{display:block;width:100%;height:auto}
+  .pack:hover:not(:disabled){transform:translateY(-5px) rotate(-1.5deg);filter:drop-shadow(0 12px 12px rgba(29,33,71,.4)) drop-shadow(0 0 10px rgba(255,210,63,.7))}
+  .pack:active:not(:disabled){transform:translateY(2px) scale(.98)}
+  .pack:disabled{filter:grayscale(.9) brightness(.85) drop-shadow(0 4px 4px rgba(29,33,71,.25));cursor:not-allowed}
+  .badge{position:absolute;top:-10px;right:-10px;min-width:42px;height:42px;border-radius:999px;background:var(--ink);color:var(--sun);display:grid;place-items:center;font-family:var(--display);font-weight:800;font-size:1.3rem;border:3px solid var(--paper)}
+  .packcap{margin:0;font-weight:800;text-align:center}
+
+  /* card */
+  .tc{position:relative;container-type:inline-size;aspect-ratio:3/4;filter:drop-shadow(0 3px 0 rgba(29,33,71,.22)) drop-shadow(0 0 var(--gr,0px) var(--rc,transparent))}
+  .tc .pic{position:absolute;left:11.1%;top:10.5%;width:77.8%;height:60.2%;display:grid;place-items:center;overflow:hidden;background:radial-gradient(circle at 50% 35%,#24347f,#0b1340);border-radius:3cqw}
+  .tc .pic img{width:100%;height:100%;object-fit:contain;display:block}
+  .tc .frame{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;display:block}
+  .tc .name{position:absolute;left:14%;right:14%;top:75%;height:11.5%;display:flex;align-items:center;justify-content:center;text-align:center;font-family:var(--display);font-weight:800;font-size:13px;font-size:7cqw;line-height:1.05;color:#fff4cf;text-shadow:0 1px 2px #000,0 0 6px rgba(0,0,0,.6)}
+  .tc .name span{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .tc .gem{position:absolute;left:14%;top:12.5%;background:var(--rc);color:#fff;font-weight:800;font-size:5.6cqw;line-height:1;padding:1.4cqw 3.2cqw;border-radius:999px;border:.7cqw solid rgba(255,255,255,.85);box-shadow:0 1px 3px rgba(0,0,0,.5)}
+  .tc .cnt{position:absolute;top:-6px;right:-6px;background:var(--ink);color:#fff;font-weight:800;font-size:.8rem;border-radius:999px;padding:2px 8px;border:2px solid var(--paper)}
+  .tc.locked .frame{filter:grayscale(1) brightness(.6)}
+  .tc.locked .pic img{filter:brightness(0) opacity(.3)}
+  .tc.locked .pic::after{content:"?";position:absolute;inset:0;display:grid;place-items:center;font-family:var(--display);font-weight:800;font-size:22cqw;color:rgba(255,255,255,.75)}
+  .tc.locked .name{color:#9aa3d6}
+  .noimg{font-family:var(--display);font-size:2.4rem;color:#9aa3d6}
+  .r-Common{--rc:var(--common)}.r-Rare{--rc:var(--rare);--gr:6px}.r-Epic{--rc:var(--epic);--gr:8px}.r-Legendary{--rc:var(--legendary);--gr:11px}
+
+
+  .btn:disabled{opacity:.45;cursor:not-allowed;box-shadow:none}
+  .roundtext{margin:6px 0 0;font-weight:700;color:var(--muted)}
+  .trayBox{margin-top:26px;background:#fff8e1;border:3px solid var(--sun);border-radius:18px;padding:16px 18px 20px}
+  .trayBox h2{font-size:1.5rem}
+  .trayBox .hint{margin:4px 0 0;font-weight:700;color:var(--muted)}
+  .round h3{font-size:1.15rem;margin:18px 0 0}
+  .trayitem{display:flex;flex-direction:column;gap:8px}
+  .trayitem .own{font-size:.85rem;font-weight:800;text-align:center;color:var(--muted)}
+  .trayitem .acts{display:flex;gap:8px}
+  .trayitem .btn{flex:1;padding:8px 6px;font-size:.95rem;box-shadow:0 3px 0 var(--ink)}
+  .toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%) translateY(10px);background:var(--ink);color:#fff;font-weight:800;padding:10px 20px;border-radius:999px;z-index:30;opacity:0;transition:opacity .2s,transform .2s;pointer-events:none;max-width:90vw;text-align:center}
+  .toast.show{opacity:1;transform:translateX(-50%)}
+
+  .series{margin-top:30px}
+  .series h2{font-size:1.6rem;display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+  .series h2 span{font-family:var(--body);font-size:1rem;font-weight:700;color:var(--muted)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:20px;margin-top:16px}
+  .msg{background:#fff;border:3px dashed var(--line);border-radius:16px;padding:22px;margin-top:26px;font-weight:700;text-align:center}
+
+  /* reveal */
+  .overlay{position:fixed;inset:0;background:rgba(14,16,48,.9);display:none;place-items:center;z-index:10;padding:16px;overflow:auto}
+  .overlay.show{display:grid}
+  .reveal{display:flex;flex-direction:column;align-items:center;gap:14px;color:#fff;text-align:center}
+  .flip{width:min(290px,70vw);aspect-ratio:3/4;perspective:1200px}
+  .flip-in{position:relative;width:100%;height:100%;transform-style:preserve-3d;transition:transform .9s cubic-bezier(.2,.8,.25,1)}
+  .flip.open .flip-in{transform:rotateY(180deg)}
+  .face{position:absolute;inset:0;backface-visibility:hidden;-webkit-backface-visibility:hidden}
+  .face.back{background:url(assets/pack.webp) center/cover no-repeat;border-radius:4%;filter:drop-shadow(0 8px 14px rgba(0,0,0,.5))}
+  .face.front{transform:rotateY(180deg)}
+  .face.front .tc{width:100%}
+  .overlay:not(.r-Common) .flip.open .face.front{animation:glow 1.6s ease-in-out .9s infinite alternate}
+  .overlay.r-Legendary .face.front::after{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(115deg,transparent 30%,rgba(255,255,255,.75) 48%,transparent 66%);background-size:250% 100%;animation:sheen 2.4s linear 1s infinite;-webkit-mask:url(assets/card-base.webp) center/100% 100% no-repeat;mask:url(assets/card-base.webp) center/100% 100% no-repeat}
+  @keyframes glow{from{filter:drop-shadow(0 0 8px var(--rc))}to{filter:drop-shadow(0 0 28px var(--rc))}}
+  @keyframes sheen{from{background-position:150% 0}to{background-position:-50% 0}}
+  .reveal .meta{font-weight:700;min-height:2.8em}
+  .pill{display:inline-block;background:var(--rc);color:#fff;border-radius:999px;padding:2px 14px;font-weight:800;margin-right:6px}
+  .actions{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+  .btn{border:3px solid var(--ink);background:var(--sun);color:var(--ink);font-weight:800;border-radius:12px;padding:10px 20px;box-shadow:0 4px 0 var(--ink)}
+  .btn.alt{background:#fff}
+  .btn:active{transform:translateY(3px);box-shadow:0 1px 0 var(--ink)}
+  @media (max-width:640px){
+    .page{padding:20px 16px 30px}.page::before{display:none}
+    .hero{grid-template-columns:1fr;justify-items:center;text-align:center}
+    .meter{margin-left:auto;margin-right:auto}
+    .grid{grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:16px}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <main class="page">
+    <section class="hero">
+      <div>
+        <h1 id="hello">Your binder</h1>
+        <div class="meter" id="meterBox" hidden>
+          <div class="track"><div class="fill" id="fill"></div></div>
+          <p id="meterText"></p>
+          <p class="roundtext" id="roundText"></p>
+        </div>
+      </div>
+      <div class="packwrap" id="packwrap" hidden>
+        <button class="pack" id="pull" disabled aria-label="Pull a character">
+          <img src="assets/pack.webp" alt="">
+          <span class="badge" id="badge" hidden>0</span>
+        </button>
+        <p class="packcap" id="packSub"></p>
+      </div>
+    </section>
+    <div class="msg" id="msg">Loading your binder…</div>
+    <section class="trayBox" id="trayBox" hidden>
+      <h2>Pick your keepers!</h2>
+      <p class="hint">You can only keep some of your pulls each round. Keep your favorites and release the rest.</p>
+      <div id="tray"></div>
+    </section>
+    <div id="binder"></div>
+  </main>
+</div>
+
+<div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-label="New character">
+  <div class="reveal" id="reveal">
+    <div class="flip" id="flip"><div class="flip-in">
+      <div class="face back"></div>
+      <div class="face front" id="rCard"></div>
+    </div></div>
+    <div class="meta" id="rMeta"></div>
+    <div class="actions">
+      <button class="btn" id="kKeep" hidden>Keep</button>
+      <button class="btn alt" id="kRel" hidden>Release</button>
+      <button class="btn alt" id="kLater" hidden>Decide later</button>
+      <button class="btn" id="close" hidden>Nice!</button>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script type="module">
+import { db, DEFAULT_WEIGHTS, DEFAULT_XP_PER_PULL, DEFAULT_ROUND_XP, DEFAULT_KEEPS, pullInfo, pickWeighted, esc } from "./common.js";
+import { doc, collection, onSnapshot, runTransaction, increment } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+const $ = s => document.querySelector(s);
+const id = new URLSearchParams(location.search).get("s");
+const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const RANK = { Legendary: 0, Epic: 1, Rare: 2, Common: 3 };
+let student = null, chars = [], pulling = false, current = null; // current = pull being shown in the reveal
+let settings = { xpPerPull: DEFAULT_XP_PER_PULL, roundXp: DEFAULT_ROUND_XP, keepsPerRound: DEFAULT_KEEPS, weights: DEFAULT_WEIGHTS };
+
+function setMsg(t) { $("#msg").hidden = !t; $("#msg").textContent = t || ""; }
+let toastTimer;
+function toast(t) { const el = $("#toast"); el.textContent = t; el.classList.add("show"); clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove("show"), 2200); }
+function img(c) { return `<img class="cimg" src="${esc(c.imageUrl)}" alt="" referrerpolicy="no-referrer" loading="lazy">`; }
+function cardHTML(c, n, locked) {
+  return `<div class="tc ${locked ? "locked" : "r-" + esc(c.rarity)}">
+    <div class="pic">${img(c)}</div>
+    <img class="frame" src="assets/card-base.webp" alt="">
+    <div class="name"><span>${locked ? "???" : esc(c.name)}</span></div>
+    ${locked ? "" : `<span class="gem">${esc(c.rarity)}</span>`}
+    ${n > 1 ? `<span class="cnt">x${n}</span>` : ""}
+  </div>`;
+}
+document.addEventListener("error", e => {
+  if (e.target.classList?.contains("cimg")) {
+    const d = document.createElement("div"); d.className = "noimg"; d.textContent = "?"; e.target.replaceWith(d);
+  }
+}, true);
+
+/*DATA-START*/
+function startListeners() {
+  if (!id) { setMsg("This page needs your personal link. Ask your teacher for it."); return; }
+  onSnapshot(doc(db, "students", id), snap => {
+    if (!snap.exists()) { student = null; setMsg("We can't find this binder. Ask your teacher for your link."); return; }
+    student = { id, ...snap.data() }; render();
+  }, () => setMsg("Can't connect right now. Try refreshing the page."));
+  onSnapshot(collection(db, "characters"), snap => { chars = snap.docs.map(d => ({ id: d.id, ...d.data() })); render(); });
+  onSnapshot(doc(db, "config", "main"), snap => {
+    const d = snap.exists() ? snap.data() : {};
+    settings = {
+      xpPerPull: Number(d.xpPerPull) || DEFAULT_XP_PER_PULL,
+      roundXp: Number(d.roundXp) || DEFAULT_ROUND_XP,
+      keepsPerRound: d.keepsPerRound === undefined ? DEFAULT_KEEPS : Math.max(0, Number(d.keepsPerRound)),
+      weights: { ...DEFAULT_WEIGHTS, ...(d.weights || {}) }
+    };
+    render();
+  });
+}
+
+// Spend one pull. Earned pulls go to the "keepers" tray to be decided on; teacher bonus pulls go straight into the binder.
+async function commitPull(pick) {
+  const ref = doc(db, "students", id);
+  return await runTransaction(db, async tx => {
+    const s = (await tx.get(ref)).data();
+    const info = pullInfo(s, settings);
+    if (!(s.enabledSeries || []).includes(pick.series)) throw new Error("series off");
+    if (info.earned > 0) {
+      const item = { u: Math.random().toString(36).slice(2, 10), id: pick.id, round: Math.floor((s.pullsUsed || 0) / info.ppr) };
+      tx.update(ref, { pullsUsed: increment(1), tray: [...(s.tray || []), item], lastPull: Date.now() });
+      return { kind: "tray", item, left: info.total - 1 };
+    }
+    if (info.bonus > 0) {
+      const have = (s.collection || {})[pick.id] || 0;
+      tx.update(ref, { bonusUsed: increment(1), ["collection." + pick.id]: increment(1), lastPull: Date.now() });
+      return { kind: "bonus", isNew: have === 0, count: have + 1, left: info.total - 1 };
+    }
+    throw new Error("no pulls");
+  });
+}
+async function commitKeep(u) {
+  const ref = doc(db, "students", id);
+  return await runTransaction(db, async tx => {
+    const s = (await tx.get(ref)).data();
+    const item = (s.tray || []).find(t => t.u === u);
+    if (!item) throw new Error("already decided");
+    const used = (s.keeps || {})["r" + item.round] || 0;
+    if (used >= settings.keepsPerRound) throw new Error("round full");
+    const have = (s.collection || {})[item.id] || 0;
+    tx.update(ref, { tray: (s.tray || []).filter(t => t.u !== u), ["collection." + item.id]: increment(1), ["keeps.r" + item.round]: increment(1) });
+    return { isNew: have === 0, count: have + 1 };
+  });
+}
+async function commitRelease(u) {
+  const ref = doc(db, "students", id);
+  await runTransaction(db, async tx => {
+    const s = (await tx.get(ref)).data();
+    tx.update(ref, { tray: (s.tray || []).filter(t => t.u !== u) });
+  });
+}
+/*DATA-END*/
+
+const poolOf = () => chars.filter(c => (student.enabledSeries || []).includes(c.series));
+const keptIn = r => (student.keeps || {})["r" + r] || 0;
+
+function render() {
+  if (!student) return;
+  const xpPer = settings.xpPerPull, K = settings.keepsPerRound, total = student.totalXp || 0, into = total % xpPer;
+  const info = pullInfo(student, settings), avail = info.total, pool = poolOf(), coll = student.collection || {};
+  $("#hello").textContent = `Hi, ${student.name}!`;
+  $("#meterBox").hidden = false;
+  $("#fill").style.width = (into / xpPer * 100) + "%";
+  $("#meterText").textContent = `${total} XP earned. ${xpPer - into} more XP for your next pull.`;
+  const nextRound = Math.floor((student.pullsUsed || 0) / info.ppr);
+  $("#roundText").textContent = `Round ${nextRound + 1}: keep ${K} of your ${info.ppr} pulls (${keptIn(nextRound)} kept so far)`;
+
+  const can = avail > 0 && pool.length > 0;
+  $("#packwrap").hidden = false;
+  $("#pull").disabled = !can;
+  $("#packSub").textContent = !pool.length ? "No series on yet" : can ? "Tap the pack to open it!" : `Next pull at ${total - into + xpPer} XP`;
+  $("#badge").hidden = !can; $("#badge").textContent = avail;
+
+  renderTray();
+
+  if (!pool.length) { setMsg("Your teacher hasn't turned on any character series for you yet."); $("#binder").innerHTML = ""; return; }
+  setMsg("");
+  const groups = (student.enabledSeries || []).filter(s => pool.some(c => c.series === s));
+  $("#binder").innerHTML = groups.map(s => {
+    const list = pool.filter(c => c.series === s).sort((a, b) => (RANK[a.rarity] - RANK[b.rarity]) || a.name.localeCompare(b.name));
+    const have = list.filter(c => coll[c.id] > 0).length;
+    return `<section class="series"><h2>${esc(s)} <span>${have} of ${list.length} found</span></h2><div class="grid">` +
+      list.map(c => cardHTML(c, coll[c.id] || 0, !(coll[c.id] > 0))).join("") + `</div></section>`;
+  }).join("");
+}
+
+function renderTray() {
+  const tray = student.tray || [], K = settings.keepsPerRound;
+  $("#trayBox").hidden = !tray.length;
+  if (!tray.length) { $("#tray").innerHTML = ""; return; }
+  const rounds = [...new Set(tray.map(t => t.round))].sort((a, b) => a - b);
+  $("#tray").innerHTML = rounds.map(r => {
+    const kept = keptIn(r), full = kept >= K;
+    return `<div class="round"><h3>Round ${r + 1}: ${kept} of ${K} kept${full ? ". This round is full, so release the rest." : ""}</h3><div class="grid">` +
+      tray.filter(t => t.round === r).map(t => {
+        const c = chars.find(x => x.id === t.id) || { name: "Missing", rarity: "Common", imageUrl: "" };
+        const own = (student.collection || {})[t.id] || 0;
+        return `<div class="trayitem" data-u="${esc(t.u)}">${cardHTML(c, 0, false)}
+          <div class="own">${own ? `You already have ${own}` : "New for your binder!"}</div>
+          <div class="acts"><button class="btn keep" ${full ? "disabled" : ""}>Keep</button><button class="btn alt rel">Release</button></div></div>`;
+      }).join("") + `</div></div>`;
+  }).join("");
+}
+
+$("#tray").addEventListener("click", async e => {
+  const b = e.target.closest("button"), row = e.target.closest(".trayitem"); if (!b || !row) return;
+  const u = row.dataset.u, t = (student.tray || []).find(x => x.u === u), c = chars.find(x => x.id === t?.id);
+  b.disabled = true;
+  try {
+    if (b.classList.contains("keep")) { await commitKeep(u); toast(`Kept ${c?.name || "it"}!`); }
+    else { await commitRelease(u); toast("Released"); }
+  } catch { toast("That didn't work. Try again."); render(); }
+});
+
+async function doPull() {
+  if (pulling || !student) return;
+  const pool = poolOf(); if (!pool.length) return;
+  pulling = true; $("#pull").disabled = true;
+  try {
+    const pick = pickWeighted(pool, settings.weights);
+    const res = await commitPull(pick);
+    showReveal(pick, res);
+  } catch (e) {
+    setMsg("That pull didn't go through. Try again in a moment.");
+    setTimeout(() => render(), 2500);
+  } finally { pulling = false; render(); }
+}
+
+function showReveal(c, res) {
+  const ov = $("#overlay"), flip = $("#flip"), K = settings.keepsPerRound;
+  ov.className = "overlay show r-" + c.rarity;
+  $("#reveal").style.setProperty("--rc", `var(--${c.rarity.toLowerCase()})`);
+  flip.classList.remove("open");
+  $("#rCard").innerHTML = cardHTML(c, 0, false);
+  ["kKeep", "kRel", "kLater", "close"].forEach(i => $("#" + i).hidden = true);
+  if (res.kind === "tray") {
+    current = { u: res.item.u, name: c.name, left: res.left };
+    const kept = keptIn(res.item.round), full = kept >= K, own = (student.collection || {})[c.id] || 0;
+    $("#rMeta").innerHTML = `${esc(c.series)}<br>${own ? `You already have ${own} of these` : "New for your binder!"}<br>Round ${res.item.round + 1}: ${kept} of ${K} kept`;
+    $("#kKeep").hidden = $("#kRel").hidden = $("#kLater").hidden = false;
+    $("#kKeep").disabled = full; $("#kKeep").textContent = full ? "Round full" : "Keep";
+    $("#kLater").textContent = res.left > 0 ? `Decide later, pull again (${res.left} left)` : "Decide later";
+    $("#kKeep").focus();
+  } else {
+    current = null;
+    $("#rMeta").innerHTML = `${esc(c.series)}<br>Bonus pull from your teacher! It's in your binder now.`;
+    $("#close").hidden = false; $("#close").focus();
+  }
+  setTimeout(() => flip.classList.add("open"), reduce ? 0 : 450);
+}
+const closeOv = () => $("#overlay").classList.remove("show");
+
+$("#pull").addEventListener("click", doPull);
+$("#close").addEventListener("click", closeOv);
+$("#kKeep").addEventListener("click", async () => {
+  const t = current; closeOv(); if (!t) return;
+  try { await commitKeep(t.u); toast(`Kept ${t.name}!`); } catch { toast("Couldn't keep that one. Check your list."); }
+});
+$("#kRel").addEventListener("click", async () => {
+  const t = current; closeOv(); if (!t) return;
+  try { await commitRelease(t.u); toast("Released"); } catch { toast("That didn't work. Try again."); }
+});
+$("#kLater").addEventListener("click", () => {
+  const t = current; closeOv();
+  if (t && t.left > 0) setTimeout(doPull, 60);
+});
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeOv(); });
+
+startListeners();
+</script>
+</body>
+</html>

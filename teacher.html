@@ -1,0 +1,429 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Binder Control Desk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;800&family=Nunito:wght@500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  body{background:var(--paper)}
+  header{background:var(--binder);color:#fff;padding:16px 20px}
+  header h1{font-size:1.8rem}
+  .wrap{max-width:1100px;margin:0 auto;padding:18px}
+  .tabs{display:flex;gap:8px;margin:0 0 18px;flex-wrap:wrap}
+  .tab{border:3px solid var(--ink);background:#fff;border-radius:12px;padding:8px 18px;font-weight:800}
+  .tab[aria-selected="true"]{background:var(--sun);box-shadow:0 3px 0 var(--ink)}
+  .box{background:#fff;border:3px solid var(--line);border-radius:16px;padding:16px;margin-bottom:18px}
+  .box h2{font-size:1.35rem;margin-bottom:10px}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:8px 0}
+  input[type=text],input[type=number],input[type=password],input[type=url],select,textarea{border:2px solid var(--line);border-radius:10px;padding:8px 10px;background:#fff;min-width:0}
+  textarea{width:100%;min-height:90px}
+  .btn{border:2px solid var(--ink);background:var(--sun);border-radius:10px;padding:7px 14px;font-weight:800}
+  .btn.alt{background:#fff}.btn.danger{background:#fff;color:#b3261e;border-color:#b3261e}
+  .chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  .chip{border:2px solid var(--line);background:#f4f1fb;border-radius:999px;padding:5px 14px;font-weight:700;color:var(--muted)}
+  .chip.on{background:var(--mint);border-color:var(--ink);color:var(--ink)}
+  .srow{border:2px solid var(--line);border-radius:14px;padding:12px;margin-top:10px}
+  .shead{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .sname{font-size:1.1rem;min-width:140px}
+  .pulls{font-weight:700;color:#12805a;min-width:90px}
+  .xpin{width:90px}
+  .note{background:#fff8da;border:2px solid var(--sun);border-radius:12px;padding:10px 14px;margin:10px 0;font-weight:600}
+  .crow{display:flex;gap:12px;align-items:center;border-bottom:1px solid var(--line);padding:8px 0}
+  .crow img{width:48px;height:64px;object-fit:contain;border-radius:6px;background:#efeaff}
+  .crow .nm{flex:1;font-weight:700}
+  .preview{width:72px;height:96px;object-fit:contain;border-radius:8px;border:2px dashed var(--line);background:#efeaff}
+  .gate{max-width:380px;margin:80px auto;background:#fff;border:3px solid var(--ink);border-radius:18px;padding:24px;box-shadow:0 6px 0 var(--ink)}
+  .gate input{width:100%;margin:12px 0}
+  .status{font-weight:700;min-height:1.3em}
+  .w{width:80px}
+</style>
+</head>
+<body>
+<div class="gate" id="gate">
+  <h2>Teacher passcode</h2>
+  <input type="password" id="pass" aria-label="Passcode" autocomplete="off">
+  <button class="btn" id="enter">Open control desk</button>
+  <p class="status" id="gateMsg"></p>
+</div>
+
+<div id="app" hidden>
+  <header><h1>Binder Control Desk</h1></header>
+  <div class="wrap">
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" data-tab="students" aria-selected="true">Students</button>
+      <button class="tab" role="tab" data-tab="chars" aria-selected="false">Characters</button>
+      <button class="tab" role="tab" data-tab="settings" aria-selected="false">Settings</button>
+    </div>
+
+    <!-- STUDENTS -->
+    <section id="tab-students">
+      <div class="box">
+        <h2>Add students</h2>
+        <div class="row">
+          <input type="text" id="newName" placeholder="Student name" aria-label="Student name">
+          <button class="btn" id="addStudent">Add student</button>
+        </div>
+        <div class="row">
+          <textarea id="bulkNames" placeholder="Or paste a list of names, one per line"></textarea>
+        </div>
+        <button class="btn alt" id="addMany">Add all names</button>
+      </div>
+
+      <div class="box">
+        <h2>Update XP from a spreadsheet</h2>
+        <div class="row"><input type="file" id="xpFile" accept=".csv,.xlsx,.xls" aria-label="XP spreadsheet"></div>
+        <div id="xpMap" hidden>
+          <div class="row">
+            <label>Name column <select id="colName"></select></label>
+            <label>XP column <select id="colXp"></select></label>
+            <label>Mode <select id="xpMode"><option value="set">Set total XP to this number</option><option value="add">Add this number to total XP</option></select></label>
+          </div>
+          <div class="row">
+            <label><input type="checkbox" id="makeMissing"> Create students who aren't added yet</label>
+            <button class="btn" id="applyXp">Apply XP</button>
+          </div>
+        </div>
+        <p class="muted" style="margin:6px 0 0">Tip: use "Add" for daily files so XP keeps stacking up toward new rounds. Use "Set" for a running total.</p>
+        <p class="status" id="xpStatus"></p>
+      </div>
+
+      <div class="box">
+        <h2>Series for selected students</h2>
+        <div class="row">
+          <label><input type="checkbox" id="selAll"> Select all</label>
+          <select id="bulkSeries" aria-label="Series"></select>
+          <button class="btn" id="bulkOn">Turn on</button>
+          <button class="btn alt" id="bulkOff">Turn off</button>
+          <span class="status" id="bulkStatus"></span>
+        </div>
+        <div id="studentList"></div>
+      </div>
+    </section>
+
+    <!-- CHARACTERS -->
+    <section id="tab-chars" hidden>
+      <div class="box">
+        <h2>Add a character</h2>
+        <div class="note">Find the picture, right-click it, choose "Copy image address", and paste it below. Links from wiki sites last longer than links from image search.</div>
+        <div class="row">
+          <input type="text" id="cName" placeholder="Character name" aria-label="Character name">
+          <input type="text" id="cSeries" list="seriesList" placeholder="Series (e.g. Pokémon)" aria-label="Series">
+          <datalist id="seriesList"></datalist>
+          <select id="cRarity" aria-label="Rarity"></select>
+        </div>
+        <div class="row">
+          <input type="url" id="cUrl" placeholder="Image link" aria-label="Image link" style="flex:1;min-width:220px">
+          <img class="preview" id="cPrev" alt="" hidden referrerpolicy="no-referrer">
+          <button class="btn" id="addChar">Add character</button>
+        </div>
+        <p class="status" id="cStatus"></p>
+      </div>
+      <div class="box">
+        <h2>Add characters from a spreadsheet</h2>
+        <p class="muted">Columns can be in any order: name, series, rarity (optional), and image link. The links need to be plain text in the cell.</p>
+        <div class="row"><input type="file" id="cFile" accept=".csv,.xlsx,.xls" aria-label="Characters spreadsheet"></div>
+        <div id="cMap" hidden>
+          <div class="row">
+            <label>Name <select id="cmName"></select></label>
+            <label>Series <select id="cmSeries"></select></label>
+            <label>Rarity <select id="cmRarity"></select></label>
+            <label>Image link <select id="cmUrl"></select></label>
+          </div>
+          <div class="row">
+            <label>Series for every row (used if no series column) <input type="text" id="cDefSeries" placeholder="e.g. Pokémon"></label>
+            <label>Rarity for every row (used if no rarity column) <select id="cDefRarity"></select></label>
+          </div>
+          <button class="btn" id="applyChars">Add characters</button>
+        </div>
+        <p class="status" id="cfStatus"></p>
+      </div>
+      <div class="box">
+        <h2>Add many at once</h2>
+        <p class="muted">One per line: Name | Series | Rarity | Image link. Tabs also work, so you can paste straight from a spreadsheet.</p>
+        <textarea id="cBulk" placeholder="Pikachu | Pokémon | Rare | https://..."></textarea>
+        <div class="row"><button class="btn" id="addBulk">Add all</button><span class="status" id="bStatus"></span></div>
+      </div>
+      <div class="box"><h2>All characters</h2><div id="charList"></div></div>
+    </section>
+
+    <!-- SETTINGS -->
+    <section id="tab-settings" hidden>
+      <div class="box">
+        <h2>Pull rules</h2>
+        <div class="row">
+          <label>XP needed per pull <input type="number" class="w" id="sXp" min="1"></label>
+          <label>XP per round <input type="number" class="w" id="sRound" min="1"></label>
+          <label>Keeps per round <input type="number" class="w" id="sKeeps" min="0"></label>
+        </div>
+        <p class="muted" id="sSummary" style="margin:4px 0 0"></p>
+        <h2 style="margin-top:14px">Rarity odds</h2>
+        <p class="muted">Bigger number means more common. Only rarities a student actually has unlocked are used.</p>
+        <div class="row" id="sWeights"></div>
+        <button class="btn" id="saveSettings">Save settings</button>
+        <span class="status" id="sStatus"></span>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script type="module">
+import { db, RARITIES, DEFAULT_WEIGHTS, DEFAULT_XP_PER_PULL, DEFAULT_ROUND_XP, DEFAULT_KEEPS, pullInfo, esc } from "./common.js";
+import { TEACHER_PASSCODE } from "./firebase-config.js";
+import { collection, doc, onSnapshot, addDoc, updateDoc, deleteDoc, setDoc, writeBatch, arrayUnion, arrayRemove, increment } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+const $ = s => document.querySelector(s);
+let students = [], chars = [], settings = { xpPerPull: DEFAULT_XP_PER_PULL, roundXp: DEFAULT_ROUND_XP, keepsPerRound: DEFAULT_KEEPS, weights: { ...DEFAULT_WEIGHTS } };
+const selected = new Set();
+let parsedRows = [];
+
+/* gate */
+function unlock() { $("#gate").hidden = true; $("#app").hidden = false; start(); }
+$("#enter").onclick = () => { if ($("#pass").value === TEACHER_PASSCODE) { sessionStorage.tc = "1"; unlock(); } else $("#gateMsg").textContent = "That passcode isn't right."; };
+$("#pass").addEventListener("keydown", e => { if (e.key === "Enter") $("#enter").click(); });
+if (sessionStorage.tc === "1") unlock();
+
+/* tabs */
+document.querySelectorAll(".tab").forEach(t => t.onclick = () => {
+  document.querySelectorAll(".tab").forEach(x => x.setAttribute("aria-selected", x === t));
+  ["students", "chars", "settings"].forEach(n => $("#tab-" + n).hidden = n !== t.dataset.tab);
+});
+
+function start() {
+  $("#cRarity").innerHTML = RARITIES.map(r => `<option>${r}</option>`).join("");
+  onSnapshot(collection(db, "students"), s => { students = s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => a.name.localeCompare(b.name)); renderStudents(); });
+  onSnapshot(collection(db, "characters"), s => { chars = s.docs.map(d => ({ id: d.id, ...d.data() })); renderChars(); renderStudents(); });
+  onSnapshot(doc(db, "config", "main"), s => {
+    const d = s.exists() ? s.data() : {};
+    settings = { xpPerPull: Number(d.xpPerPull) || DEFAULT_XP_PER_PULL, roundXp: Number(d.roundXp) || DEFAULT_ROUND_XP, keepsPerRound: d.keepsPerRound === undefined ? DEFAULT_KEEPS : Math.max(0, Number(d.keepsPerRound)), weights: { ...DEFAULT_WEIGHTS, ...(d.weights || {}) } };
+    renderSettings(); renderStudents();
+  });
+}
+const allSeries = () => [...new Set(chars.map(c => c.series))].sort((a, b) => a.localeCompare(b));
+const linkFor = id => new URL("index.html?s=" + id, location.href).href;
+const norm = s => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
+const say = (sel, t) => { $(sel).textContent = t; };
+
+/* ---------- students ---------- */
+function renderStudents() {
+  const series = allSeries();
+  const cur = $("#bulkSeries").value;
+  $("#bulkSeries").innerHTML = series.map(s => `<option>${esc(s)}</option>`).join("");
+  if (series.includes(cur)) $("#bulkSeries").value = cur;
+  $("#studentList").innerHTML = students.length ? students.map(s => {
+    const en = s.enabledSeries || [], info = pullInfo(s, settings), avail = info.total, waiting = (s.tray || []).length;
+    return `<div class="srow" data-id="${s.id}">
+      <div class="shead">
+        <input type="checkbox" class="sel" ${selected.has(s.id) ? "checked" : ""} aria-label="Select ${esc(s.name)}">
+        <strong class="sname">${esc(s.name)}</strong>
+        <span class="pulls">${avail} pull${avail === 1 ? "" : "s"} ready${waiting ? ` · ${waiting} to decide` : ""}</span>
+        <input type="number" class="xpin" min="0" value="${s.totalXp || 0}" aria-label="Total XP for ${esc(s.name)}">
+        <button class="btn setxp">Set XP</button>
+        <button class="btn alt gift" title="Goes straight into their binder and does not use up their keeps">Give 1 bonus pull</button>
+        <button class="btn alt copy">Copy link</button>
+        <button class="btn danger del">Remove</button>
+      </div>
+      <div class="chips">${series.length ? series.map(sr => `<button class="chip ${en.includes(sr) ? "on" : ""}" data-series="${esc(sr)}" aria-pressed="${en.includes(sr)}">${esc(sr)}</button>`).join("") : '<span class="muted">Add characters to create series.</span>'}</div>
+    </div>`;
+  }).join("") : '<p class="muted">No students yet.</p>';
+  $("#selAll").checked = students.length > 0 && students.every(s => selected.has(s.id));
+}
+
+$("#studentList").addEventListener("click", async e => {
+  const row = e.target.closest(".srow"); if (!row) return;
+  const id = row.dataset.id, s = students.find(x => x.id === id), ref = doc(db, "students", id);
+  if (e.target.classList.contains("chip")) {
+    const sr = e.target.dataset.series, on = (s.enabledSeries || []).includes(sr);
+    await updateDoc(ref, { enabledSeries: on ? arrayRemove(sr) : arrayUnion(sr) });
+  } else if (e.target.classList.contains("setxp")) {
+    await updateDoc(ref, { totalXp: Math.max(0, Number(row.querySelector(".xpin").value) || 0) });
+  } else if (e.target.classList.contains("gift")) {
+    await updateDoc(ref, { bonusPulls: increment(1) });
+  } else if (e.target.classList.contains("copy")) {
+    try { await navigator.clipboard.writeText(linkFor(id)); e.target.textContent = "Copied!"; setTimeout(() => e.target.textContent = "Copy link", 1200); }
+    catch { prompt("Copy this link:", linkFor(id)); }
+  } else if (e.target.classList.contains("del")) {
+    if (confirm(`Remove ${s.name} and their collection?`)) await deleteDoc(ref);
+  }
+});
+$("#studentList").addEventListener("change", e => {
+  if (!e.target.classList.contains("sel")) return;
+  const id = e.target.closest(".srow").dataset.id;
+  e.target.checked ? selected.add(id) : selected.delete(id);
+  $("#selAll").checked = students.every(s => selected.has(s.id));
+});
+$("#selAll").onchange = e => { students.forEach(s => e.target.checked ? selected.add(s.id) : selected.delete(s.id)); renderStudents(); };
+
+async function bulkSeries(on) {
+  const sr = $("#bulkSeries").value;
+  if (!sr) return say("#bulkStatus", "Pick a series first.");
+  if (!selected.size) return say("#bulkStatus", "Select at least one student.");
+  const b = writeBatch(db);
+  selected.forEach(id => b.update(doc(db, "students", id), { enabledSeries: on ? arrayUnion(sr) : arrayRemove(sr) }));
+  await b.commit();
+  say("#bulkStatus", `${sr} turned ${on ? "on" : "off"} for ${selected.size} student${selected.size === 1 ? "" : "s"}.`);
+}
+$("#bulkOn").onclick = () => bulkSeries(true);
+$("#bulkOff").onclick = () => bulkSeries(false);
+
+const newStudent = name => ({ name, totalXp: 0, bonusPulls: 0, bonusUsed: 0, pullsUsed: 0, enabledSeries: [], collection: {}, tray: [], keeps: {}, created: Date.now() });
+$("#addStudent").onclick = async () => {
+  const n = $("#newName").value.trim(); if (!n) return;
+  await addDoc(collection(db, "students"), newStudent(n)); $("#newName").value = "";
+};
+$("#newName").addEventListener("keydown", e => { if (e.key === "Enter") $("#addStudent").click(); });
+$("#addMany").onclick = async () => {
+  const names = $("#bulkNames").value.split("\n").map(x => x.trim()).filter(Boolean);
+  const have = new Set(students.map(s => norm(s.name)));
+  const fresh = names.filter(n => !have.has(norm(n)));
+  for (let i = 0; i < fresh.length; i += 400) {
+    const b = writeBatch(db);
+    fresh.slice(i, i + 400).forEach(n => b.set(doc(collection(db, "students")), newStudent(n)));
+    await b.commit();
+  }
+  $("#bulkNames").value = "";
+};
+
+/* XP spreadsheet */
+$("#xpFile").onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  try {
+    const wb = XLSX.read(await f.arrayBuffer(), { type: "array" });
+    parsedRows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" });
+    const cols = Object.keys(parsedRows[0] || {});
+    if (!cols.length) throw new Error("empty");
+    const opts = cols.map(c => `<option>${esc(c)}</option>`).join("");
+    $("#colName").innerHTML = opts; $("#colXp").innerHTML = opts;
+    $("#colName").value = cols.find(c => /name|student/i.test(c)) || cols[0];
+    $("#colXp").value = cols.find(c => /xp/i.test(c)) || cols[cols.length - 1];
+    $("#xpMap").hidden = false; say("#xpStatus", `${parsedRows.length} rows found. Check the columns, then apply.`);
+  } catch { $("#xpMap").hidden = true; say("#xpStatus", "I couldn't read that file. Try saving it as .csv or .xlsx."); }
+};
+$("#applyXp").onclick = async () => {
+  const nc = $("#colName").value, xc = $("#colXp").value, mode = $("#xpMode").value, make = $("#makeMissing").checked;
+  const byName = new Map(students.map(s => [norm(s.name), s]));
+  const b = writeBatch(db); let upd = 0, made = 0; const missing = [];
+  for (const r of parsedRows) {
+    const name = String(r[nc] || "").trim(); if (!name) continue;
+    const xp = Number(String(r[xc]).replace(/[^0-9.\-]/g, "")); if (!isFinite(xp)) continue;
+    const s = byName.get(norm(name));
+    if (s) { b.update(doc(db, "students", s.id), { totalXp: mode === "add" ? increment(xp) : Math.max(0, xp) }); upd++; }
+    else if (make) { b.set(doc(collection(db, "students")), { ...newStudent(name), totalXp: Math.max(0, xp) }); made++; }
+    else missing.push(name);
+  }
+  if (upd + made > 450) return say("#xpStatus", "That's a lot of rows for one go. Split the file in two.");
+  await b.commit();
+  say("#xpStatus", `Updated ${upd}${made ? `, created ${made}` : ""}.` + (missing.length ? ` Not found: ${missing.slice(0, 8).join(", ")}${missing.length > 8 ? "…" : ""}` : ""));
+};
+
+/* ---------- characters ---------- */
+$("#cUrl").addEventListener("input", e => { const v = e.target.value.trim(); $("#cPrev").hidden = !v; if (v) $("#cPrev").src = v; });
+$("#addChar").onclick = async () => {
+  const name = $("#cName").value.trim(), series = $("#cSeries").value.trim(), imageUrl = $("#cUrl").value.trim();
+  if (!name || !series || !imageUrl) return say("#cStatus", "Name, series, and image link are all needed.");
+  await addDoc(collection(db, "characters"), { name, series, rarity: $("#cRarity").value, imageUrl, created: Date.now() });
+  ["#cName", "#cUrl"].forEach(s => $(s).value = ""); $("#cPrev").hidden = true;
+  say("#cStatus", `Added ${name} to ${series}.`);
+};
+$("#addBulk").onclick = async () => {
+  const lines = $("#cBulk").value.split("\n").map(l => l.split(/\t|\|/).map(x => x.trim())).filter(p => p.length >= 4 && p[0] && p[1] && p[3]);
+  if (!lines.length) return say("#bStatus", "No usable lines. Each needs 4 parts.");
+  for (let i = 0; i < lines.length; i += 400) {
+    const b = writeBatch(db);
+    lines.slice(i, i + 400).forEach(([name, series, rar, imageUrl]) => {
+      const rarity = RARITIES.find(r => r.toLowerCase() === rar.toLowerCase()) || "Common";
+      b.set(doc(collection(db, "characters")), { name, series, rarity, imageUrl, created: Date.now() });
+    });
+    await b.commit();
+  }
+  $("#cBulk").value = ""; say("#bStatus", `Added ${lines.length} characters.`);
+};
+
+/* characters spreadsheet */
+let charRows = [];
+$("#cFile").onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  try {
+    const wb = XLSX.read(await f.arrayBuffer(), { type: "array" });
+    charRows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" });
+    const cols = Object.keys(charRows[0] || {});
+    if (!cols.length) throw new Error("empty");
+    const opts = cols.map(c => `<option>${esc(c)}</option>`).join("");
+    const optNone = `<option value="">(none)</option>` + opts;
+    $("#cmName").innerHTML = opts; $("#cmUrl").innerHTML = opts;
+    $("#cmSeries").innerHTML = optNone; $("#cmRarity").innerHTML = optNone;
+    $("#cDefRarity").innerHTML = RARITIES.map(r => `<option>${r}</option>`).join("");
+    $("#cmName").value = cols.find(c => /name|character/i.test(c)) || cols[0];
+    $("#cmSeries").value = cols.find(c => /series|show|game|franchise|source|anime/i.test(c)) || "";
+    $("#cmRarity").value = cols.find(c => /rar|tier/i.test(c)) || "";
+    $("#cmUrl").value = cols.find(c => /url|link|image|img|pic/i.test(c)) || cols[cols.length - 1];
+    $("#cMap").hidden = false; say("#cfStatus", `${charRows.length} rows found. Check the columns, then add.`);
+  } catch { $("#cMap").hidden = true; say("#cfStatus", "I couldn't read that file. Try saving it as .csv or .xlsx."); }
+};
+$("#applyChars").onclick = async () => {
+  const nc = $("#cmName").value, sc = $("#cmSeries").value, rc = $("#cmRarity").value, uc = $("#cmUrl").value;
+  const defSeries = $("#cDefSeries").value.trim(), defRarity = $("#cDefRarity").value;
+  const have = new Set(chars.map(c => norm(c.series) + "|" + norm(c.name)));
+  const toAdd = []; let dupes = 0, bad = 0;
+  for (const r of charRows) {
+    const name = String(r[nc] || "").trim(), series = (sc ? String(r[sc] || "").trim() : "") || defSeries, imageUrl = String(r[uc] || "").trim();
+    if (!name || !series || !/^https?:\/\//i.test(imageUrl)) { bad++; continue; }
+    const key = norm(series) + "|" + norm(name);
+    if (have.has(key)) { dupes++; continue; }
+    have.add(key);
+    const rarity = RARITIES.find(x => x.toLowerCase() === String(rc ? r[rc] : "").trim().toLowerCase()) || defRarity;
+    toAdd.push({ name, series, rarity, imageUrl, created: Date.now() });
+  }
+  if (!toAdd.length) return say("#cfStatus", `Nothing to add. ${bad} rows were missing a name, series, or a link starting with http, and ${dupes} were already added.`);
+  for (let i = 0; i < toAdd.length; i += 400) {
+    const b = writeBatch(db);
+    toAdd.slice(i, i + 400).forEach(c => b.set(doc(collection(db, "characters")), c));
+    await b.commit();
+  }
+  say("#cfStatus", `Added ${toAdd.length} characters.` + (dupes ? ` Skipped ${dupes} already in the list.` : "") + (bad ? ` Skipped ${bad} rows missing a name, series, or link.` : ""));
+};
+function renderChars() {
+  $("#seriesList").innerHTML = allSeries().map(s => `<option value="${esc(s)}">`).join("");
+  const groups = allSeries();
+  $("#charList").innerHTML = groups.length ? groups.map(sr => {
+    const list = chars.filter(c => c.series === sr).sort((a, b) => a.name.localeCompare(b.name));
+    return `<h3 style="margin:16px 0 4px">${esc(sr)} <span class="muted" style="font-family:var(--body);font-size:1rem">${list.length}</span></h3>` + list.map(c => `
+      <div class="crow" data-id="${c.id}">
+        <img src="${esc(c.imageUrl)}" alt="" referrerpolicy="no-referrer" loading="lazy">
+        <span class="nm">${esc(c.name)}</span>
+        <select class="rar" aria-label="Rarity for ${esc(c.name)}">${RARITIES.map(r => `<option ${r === c.rarity ? "selected" : ""}>${r}</option>`).join("")}</select>
+        <button class="btn alt relink">Change link</button>
+        <button class="btn danger delc">Delete</button>
+      </div>`).join("");
+  }).join("") : '<p class="muted">No characters yet.</p>';
+}
+$("#charList").addEventListener("change", async e => {
+  if (e.target.classList.contains("rar")) await updateDoc(doc(db, "characters", e.target.closest(".crow").dataset.id), { rarity: e.target.value });
+});
+$("#charList").addEventListener("click", async e => {
+  const row = e.target.closest(".crow"); if (!row) return;
+  const ref = doc(db, "characters", row.dataset.id), c = chars.find(x => x.id === row.dataset.id);
+  if (e.target.classList.contains("relink")) { const u = prompt("New image link for " + c.name, c.imageUrl); if (u && u.trim()) await updateDoc(ref, { imageUrl: u.trim() }); }
+  if (e.target.classList.contains("delc") && confirm(`Delete ${c.name}?`)) await deleteDoc(ref);
+});
+
+/* ---------- settings ---------- */
+function renderSettings() {
+  if (document.activeElement && document.activeElement.tagName === "INPUT" && $("#tab-settings").contains(document.activeElement)) return;
+  $("#sXp").value = settings.xpPerPull; $("#sRound").value = settings.roundXp; $("#sKeeps").value = settings.keepsPerRound;
+  const ppr = Math.max(1, Math.floor(settings.roundXp / settings.xpPerPull));
+  $("#sSummary").textContent = `Every ${settings.roundXp} XP is a round: ${ppr} pulls, and students keep ${settings.keepsPerRound} of them.`;
+  $("#sWeights").innerHTML = RARITIES.map(r => `<label>${r} <input type="number" class="w wt" data-r="${r}" min="0" value="${settings.weights[r]}"></label>`).join("");
+}
+$("#saveSettings").onclick = async () => {
+  const weights = {}; document.querySelectorAll(".wt").forEach(i => weights[i.dataset.r] = Math.max(0, Number(i.value) || 0));
+  await setDoc(doc(db, "config", "main"), { xpPerPull: Math.max(1, Number($("#sXp").value) || DEFAULT_XP_PER_PULL), roundXp: Math.max(1, Number($("#sRound").value) || DEFAULT_ROUND_XP), keepsPerRound: Math.max(0, Number($("#sKeeps").value)), weights }, { merge: true });
+  say("#sStatus", "Saved.");
+};
+</script>
+</body>
+</html>
