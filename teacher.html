@@ -117,6 +117,19 @@
       </div>
 
       <div class="box">
+        <h2>Keep only certain students</h2>
+        <p class="muted">Added too many names? Click the names you want to keep (they turn green), then remove everyone else.</p>
+        <div class="row">
+          <input type="text" id="keepFind" placeholder="Find a name" aria-label="Find a name">
+          <button class="btn alt" id="keepAll">Keep everyone shown</button>
+          <button class="btn alt" id="keepNone">Clear</button>
+          <strong id="keepCount"></strong>
+        </div>
+        <div class="chips" id="keepChips"></div>
+        <div class="row"><button class="btn danger" id="keepRemove" disabled>Remove the others</button><span class="status" id="keepStatus"></span></div>
+      </div>
+
+      <div class="box">
         <h2>Paste XP for your class</h2>
         <p class="muted">Copy the rows from your spreadsheet or report and paste them here. The whole class (or even the whole school) can be in there. Only students you've added are updated, and everyone else is ignored.</p>
         <textarea id="pasteBox" placeholder="Paste here. Include the header row if you have one." aria-label="Pasted XP data"></textarea>
@@ -253,6 +266,7 @@ const $ = s => document.querySelector(s);
 let students = [], chars = [], settings = { xpPerPull: DEFAULT_XP_PER_PULL, roundXp: DEFAULT_ROUND_XP, keepsPerRound: DEFAULT_KEEPS, weights: { ...DEFAULT_WEIGHTS }, day: 1, dayStartedAt: 0 };
 const selected = new Set();
 let parsedRows = [];
+const keepSet = new Set();
 let pasteTable = null, pasteResult = [], lastPaste = null, xpTouched = false;
 
 /* Google sign-in */
@@ -331,6 +345,8 @@ function renderStudents() {
     </div>`;
   }).join("") : '<p class="muted">No students yet.</p>';
   $("#selAll").checked = students.length > 0 && students.every(s => selected.has(s.id));
+  for (const id of [...selected]) if (!students.some(s => s.id === id)) selected.delete(id);
+  renderKeep();
   if (pasteTable) previewPaste();
 }
 
@@ -401,6 +417,43 @@ $("#addMany").onclick = async () => {
     await b.commit();
   }
   $("#bulkNames").value = "";
+};
+
+/* keep only certain students */
+function renderKeep() {
+  for (const id of [...keepSet]) if (!students.some(s => s.id === id)) keepSet.delete(id);
+  const q = norm($("#keepFind").value);
+  const shown = students.filter(s => !q || norm(s.name).includes(q));
+  $("#keepChips").innerHTML = shown.length
+    ? shown.map(s => `<button class="chip ${keepSet.has(s.id) ? "on" : ""}" data-id="${esc(s.id)}" aria-pressed="${keepSet.has(s.id)}">${esc(s.name)}</button>`).join("")
+    : '<span class="muted">No names to show.</span>';
+  const others = students.length - keepSet.size;
+  $("#keepCount").textContent = students.length ? `Keeping ${keepSet.size} of ${students.length}` : "";
+  $("#keepRemove").disabled = !(keepSet.size > 0 && others > 0);
+  $("#keepRemove").textContent = others > 0 ? `Remove the other ${others}` : "Remove the others";
+}
+$("#keepChips").addEventListener("click", e => {
+  const b = e.target.closest(".chip"); if (!b) return;
+  keepSet.has(b.dataset.id) ? keepSet.delete(b.dataset.id) : keepSet.add(b.dataset.id);
+  say("#keepStatus", ""); renderKeep();
+});
+$("#keepFind").addEventListener("input", renderKeep);
+$("#keepAll").onclick = () => { const q = norm($("#keepFind").value); students.filter(s => !q || norm(s.name).includes(q)).forEach(s => keepSet.add(s.id)); renderKeep(); };
+$("#keepNone").onclick = () => { keepSet.clear(); renderKeep(); };
+$("#keepRemove").onclick = async () => {
+  const del = students.filter(s => !keepSet.has(s.id));
+  if (!keepSet.size || !del.length) return;
+  const names = del.slice(0, 8).map(s => s.name).join(", ") + (del.length > 8 ? `, and ${del.length - 8} more` : "");
+  if (!confirm(`Remove ${del.length} student${del.length === 1 ? "" : "s"} and their collections?\n\n${names}\n\nKeeping ${keepSet.size}. This can't be undone.`)) return;
+  try {
+    for (let i = 0; i < del.length; i += 400) {
+      const b = writeBatch(db);
+      del.slice(i, i + 400).forEach(s => b.delete(doc(db, "students", s.id)));
+      await b.commit();
+    }
+    keepSet.clear();
+    say("#keepStatus", `Removed ${del.length}.`);
+  } catch { say("#keepStatus", "That didn't finish. Check your connection and try again."); }
 };
 
 /* new day */
@@ -551,7 +604,7 @@ $("#pasteApply").onclick = async () => {
 };
 $("#pasteUndo").onclick = async () => {
   if (!lastPaste) return;
-  const b = writeBatch(db); lastPaste.forEach(p => b.update(doc(db, "students", p.id), { totalXp: p.xp }));
+  const b = writeBatch(db); lastPaste = lastPaste.filter(p => students.some(s => s.id === p.id)); lastPaste.forEach(p => b.update(doc(db, "students", p.id), { totalXp: p.xp }));
   try { await b.commit(); } catch { return say("#pasteStatus", "Couldn't undo. Try again."); }
   say("#pasteStatus", `Put ${lastPaste.length} students back to their earlier XP.`); lastPaste = null; $("#pasteUndo").hidden = true;
 };
