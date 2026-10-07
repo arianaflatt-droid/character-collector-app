@@ -65,7 +65,7 @@
   }
   window.addEventListener("error", function (e) {
     var t = e.target;
-    if (t && t !== window && t.tagName) { if (t.tagName === "SCRIPT" || t.tagName === "LINK") show("A file didn't load: " + (t.src || t.href)); return; }
+    if (t && t !== window && t.tagName) { if (t.tagName === "SCRIPT" || (t.tagName === "LINK" && !/fonts\.(googleapis|gstatic)/.test(t.href || ""))) show("A file didn't load: " + (t.src || t.href)); return; }
     show("Something went wrong loading this page:\n" + (e.message || "unknown error"));
   }, true);
   window.addEventListener("unhandledrejection", function (e) { show("Something went wrong:\n" + ((e.reason && e.reason.message) || e.reason)); });
