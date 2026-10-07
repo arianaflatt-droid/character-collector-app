@@ -173,7 +173,7 @@
 
 <script type="module">
 import { db, DEFAULT_WEIGHTS, DEFAULT_XP_PER_PULL, DEFAULT_ROUND_XP, DEFAULT_KEEPS, pullInfo, pickWeighted, esc, firstName } from "./common.js";
-import { doc, collection, onSnapshot, runTransaction, increment, query, where, getDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { doc, collection, onSnapshot, updateDoc, increment, arrayUnion, arrayRemove, query, where, getDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 window.__loaded = true;
 const $ = s => document.querySelector(s);
@@ -246,48 +246,45 @@ async function fetchChar(cid) {
   return snap.exists() ? { id: cid, ...snap.data() } : null;
 }
 
-// Spend one pull. Earned pulls go to the "keepers" tray to be decided on; teacher bonus pulls go straight into the binder.
+// Pulls, keeps and releases are saved with plain updates (the kind that worked in the connection check), not transactions.
+// A pull earned with XP goes to the "keepers" tray to be decided on; teacher bonus pulls go straight into the binder.
+const busy = new Set();
+const oops = (code, msg) => Object.assign(new Error(msg), { code });
 async function commitPull(pick) {
-  const ref = doc(db, "students", id), cfgRef = doc(db, "config", "main");
-  return await runTransaction(db, async tx => {
-    const s = (await tx.get(ref)).data();
-    const day = Number(((await tx.get(cfgRef)).data() || {}).day) || 1;     // today's day number (the teacher bumps it with "Start new day")
-    const info = pullInfo(s, settings);
-    if (!(s.enabledSeries || []).includes(pick.series)) throw new Error("series off");
-    if (info.earned > 0) {
-      const todayCount = s.pullsDay === day ? (s.pullsToday || 0) : 0;      // pulls made so far today
-      const block = Math.floor(todayCount / info.ppr);                      // each 120 XP worth of pulls is its own round of keeps
-      const item = { u: Math.random().toString(36).slice(2, 10), id: pick.id, day, block, rk: `d${day}b${block}` };
-      tx.update(ref, { pullsUsed: increment(1), pullsDay: day, pullsToday: todayCount + 1, tray: [...(s.tray || []), item], lastPull: Date.now() });
-      return { kind: "tray", item, left: info.total - 1 };
-    }
-    if (info.bonus > 0) {
-      const have = (s.collection || {})[pick.id] || 0;
-      tx.update(ref, { bonusUsed: increment(1), ["collection." + pick.id]: increment(1), lastPull: Date.now() });
-      return { kind: "bonus", isNew: have === 0, count: have + 1, left: info.total - 1 };
-    }
-    throw new Error("no pulls");
-  });
+  const ref = doc(db, "students", id), s = student, day = settings.day;
+  const info = pullInfo(s, settings);
+  if (!(s.enabledSeries || []).includes(pick.series)) throw oops("series-off", "That series is turned off");
+  if (info.earned > 0) {
+    const todayCount = s.pullsDay === day ? (s.pullsToday || 0) : 0;      // pulls made so far today
+    const block = Math.floor(todayCount / info.ppr);                      // each 120 XP worth of pulls is its own round of keeps
+    const item = { u: Math.random().toString(36).slice(2, 10), id: pick.id, day, block, rk: `d${day}b${block}` };
+    await updateDoc(ref, { pullsUsed: increment(1), pullsDay: day, pullsToday: todayCount + 1, tray: arrayUnion(item), lastPull: Date.now() });
+    return { kind: "tray", item, left: info.total - 1 };
+  }
+  if (info.bonus > 0) {
+    const have = (s.collection || {})[pick.id] || 0;
+    await updateDoc(ref, { bonusUsed: increment(1), ["collection." + pick.id]: increment(1), lastPull: Date.now() });
+    return { kind: "bonus", isNew: have === 0, count: have + 1, left: info.total - 1 };
+  }
+  throw oops("no-pulls", "No pulls left");
 }
 async function commitKeep(u) {
-  const ref = doc(db, "students", id);
-  return await runTransaction(db, async tx => {
-    const s = (await tx.get(ref)).data();
-    const item = (s.tray || []).find(t => t.u === u);
-    if (!item) throw new Error("already decided");
-    const rk = rkOf(item), used = (s.keeps || {})[rk] || 0;
-    if (used >= settings.keepsPerRound) throw new Error("round full");
-    const have = (s.collection || {})[item.id] || 0;
-    tx.update(ref, { tray: (s.tray || []).filter(t => t.u !== u), ["collection." + item.id]: increment(1), ["keeps." + rk]: increment(1) });
-    return { isNew: have === 0, count: have + 1 };
-  });
+  const item = (student.tray || []).find(t => t.u === u);
+  if (!item || busy.has(u)) throw oops("already-decided", "Already decided");
+  const rk = rkOf(item), used = (student.keeps || {})[rk] || 0;
+  if (used >= settings.keepsPerRound) throw oops("round-full", "That round is full");
+  const have = (student.collection || {})[item.id] || 0;
+  busy.add(u);
+  try { await updateDoc(doc(db, "students", id), { tray: arrayRemove(item), ["collection." + item.id]: increment(1), ["keeps." + rk]: increment(1) }); }
+  finally { busy.delete(u); }
+  return { isNew: have === 0, count: have + 1 };
 }
 async function commitRelease(u) {
-  const ref = doc(db, "students", id);
-  await runTransaction(db, async tx => {
-    const s = (await tx.get(ref)).data();
-    tx.update(ref, { tray: (s.tray || []).filter(t => t.u !== u) });
-  });
+  const item = (student.tray || []).find(t => t.u === u);
+  if (!item || busy.has(u)) throw oops("already-decided", "Already decided");
+  busy.add(u);
+  try { await updateDoc(doc(db, "students", id), { tray: arrayRemove(item) }); }
+  finally { busy.delete(u); }
 }
 /*DATA-END*/
 
