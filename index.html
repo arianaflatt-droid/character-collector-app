@@ -95,6 +95,29 @@
 </style>
 </head>
 <body>
+<script>
+// Shows a red box if this page's scripts fail to load, so problems are visible without developer tools.
+(function () {
+  function show(msg) {
+    var d = document.getElementById("bootErr");
+    if (!d) {
+      d = document.createElement("div"); d.id = "bootErr";
+      d.style.cssText = "position:fixed;left:12px;right:12px;bottom:12px;z-index:99;background:#fde8e6;border:2px solid #b3261e;color:#7a1810;padding:12px 14px;border-radius:12px;font:700 14px/1.4 sans-serif;white-space:pre-wrap";
+      document.body.appendChild(d);
+    }
+    d.textContent = msg;
+  }
+  window.addEventListener("error", function (e) {
+    var t = e.target;
+    if (t && t !== window && t.tagName) { if (t.tagName === "SCRIPT" || t.tagName === "LINK") show("A file didn't load: " + (t.src || t.href)); return; }
+    show("Something went wrong loading this page:\n" + (e.message || "unknown error"));
+  }, true);
+  window.addEventListener("unhandledrejection", function (e) { show("Something went wrong:\n" + ((e.reason && e.reason.message) || e.reason)); });
+  setTimeout(function () {
+    if (!window.__loaded) show("This page's scripts didn't finish loading. A file in your GitHub repo is probably missing or out of date. Make sure common.js, firebase-config.js, and styles.css are uploaded next to this page, then reload with Ctrl+Shift+R.");
+  }, 6000);
+})();
+</script>
 <div class="wrap">
   <main class="page">
     <section class="hero">
@@ -145,6 +168,7 @@
 import { db, DEFAULT_WEIGHTS, DEFAULT_XP_PER_PULL, DEFAULT_ROUND_XP, DEFAULT_KEEPS, pullInfo, pickWeighted, esc } from "./common.js";
 import { doc, collection, onSnapshot, runTransaction, increment } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
+window.__loaded = true;
 const $ = s => document.querySelector(s);
 const id = new URLSearchParams(location.search).get("s");
 const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
