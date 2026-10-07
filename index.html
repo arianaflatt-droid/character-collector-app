@@ -273,6 +273,19 @@ async function commitRelease(u) {
 }
 /*DATA-END*/
 
+// If the database says it's busy for a moment, try again a couple of times before giving up.
+async function withRetry(fn) {
+  const transient = new Set(["resource-exhausted", "unavailable", "aborted", "deadline-exceeded", "internal"]);
+  let last;
+  for (let i = 0; i < 3; i++) {
+    try { return await fn(); }
+    catch (e) { last = e; if (!transient.has(e?.code)) throw e; await new Promise(r => setTimeout(r, 800 * (i + 1))); }
+  }
+  throw last;
+}
+{ const p = commitPull, k = commitKeep, r = commitRelease;
+  commitPull = a => withRetry(() => p(a)); commitKeep = a => withRetry(() => k(a)); commitRelease = a => withRetry(() => r(a)); }
+
 const poolOf = () => chars.filter(c => (student.enabledSeries || []).includes(c.series));
 const rkOf = t => t.rk || ("r" + t.round);                 // older pulls used "r0", "r1"...
 const keptIn = rk => (student.keeps || {})[rk] || 0;
