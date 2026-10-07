@@ -42,6 +42,10 @@
   .tc.locked .pic img{filter:brightness(0) opacity(.3)}
   .tc.locked .pic::after{content:"?";position:absolute;inset:0;display:grid;place-items:center;font-family:var(--display);font-weight:800;font-size:22cqw;color:rgba(255,255,255,.75)}
   .tc.locked .name{color:#9aa3d6}
+  .tc.noframe{border:3px solid #d4a73a;border-radius:14px;background:linear-gradient(160deg,#16226b,#0b1340);box-shadow:0 0 0 2px #7a5a10 inset}
+  .pack.nopack{aspect-ratio:3/4.2;display:grid;place-items:center;background:linear-gradient(155deg,#ffd23f 0%,#ff6f59 45%,#a259ff 100%);border:3px solid var(--ink);border-radius:16px;box-shadow:0 6px 0 var(--ink)}
+  .pack.nopack img{display:none}
+  .pack.nopack::after{content:"Pull!";font-family:var(--display);font-weight:800;font-size:1.8rem;color:#fff;text-shadow:0 2px 0 rgba(29,33,71,.45)}
   .noimg{font-family:var(--display);font-size:2.4rem;color:#9aa3d6}
   .r-Common{--rc:var(--common)}.r-Rare{--rc:var(--rare);--gr:6px}.r-Epic{--rc:var(--epic);--gr:8px}.r-Legendary{--rc:var(--legendary);--gr:11px}
 
@@ -75,7 +79,7 @@
   .flip-in{position:relative;width:100%;height:100%;transform-style:preserve-3d;transition:transform .9s cubic-bezier(.2,.8,.25,1)}
   .flip.open .flip-in{transform:rotateY(180deg)}
   .face{position:absolute;inset:0;backface-visibility:hidden;-webkit-backface-visibility:hidden}
-  .face.back{background:url(assets/pack.webp) center/cover no-repeat;border-radius:4%;filter:drop-shadow(0 8px 14px rgba(0,0,0,.5))}
+  .face.back{background:url(assets/pack.webp) center/cover no-repeat,linear-gradient(155deg,#ffd23f 0%,#ff6f59 45%,#a259ff 100%);border-radius:4%;filter:drop-shadow(0 8px 14px rgba(0,0,0,.5))}
   .face.front{transform:rotateY(180deg)}
   .face.front .tc{width:100%}
   .overlay:not(.r-Common) .flip.open .face.front{animation:glow 1.6s ease-in-out .9s infinite alternate}
@@ -134,7 +138,7 @@
       </div>
       <div class="packwrap" id="packwrap" hidden>
         <button class="pack" id="pull" disabled aria-label="Pull a character">
-          <img src="assets/pack.webp" alt="">
+          <img src="assets/pack.webp" alt="" onerror="this.parentElement.classList.add('nopack')">
           <span class="badge" id="badge" hidden>0</span>
         </button>
         <p class="packcap" id="packSub"></p>
@@ -193,8 +197,13 @@ function cardHTML(c, n, locked) {
   </div>`;
 }
 document.addEventListener("error", e => {
-  if (e.target.classList?.contains("cimg")) {
-    const d = document.createElement("div"); d.className = "noimg"; d.textContent = "?"; e.target.replaceWith(d);
+  const el = e.target;
+  if (el.classList?.contains("cimg")) {
+    const d = document.createElement("div"); d.className = "noimg"; d.textContent = "?"; el.replaceWith(d);
+  } else if (el.classList?.contains("frame")) {            // card-base.webp is missing: draw a plain gold frame instead
+    el.style.display = "none"; el.closest(".tc")?.classList.add("noframe");
+  } else if (el.parentElement?.classList.contains("pack")) { // pack.webp is missing: use a plain pack button instead
+    el.parentElement.classList.add("nopack");
   }
 }, true);
 
