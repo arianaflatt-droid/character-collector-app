@@ -131,12 +131,10 @@
 
       <div class="box">
         <h2>Paste XP for your class</h2>
-        <p class="muted">Copy the rows from your spreadsheet or report and paste them here. The whole class (or even the whole school) can be in there. Only students you've added are updated, and everyone else is ignored.</p>
+        <p class="muted">Copy the rows from your spreadsheet or report and paste them here. The whole class (or even the whole school) can be in there. For each of your students it reads the number before the slash (like the 105 in "105 / 160"), or the first number after their name if there is no slash. Everyone else is ignored.</p>
         <textarea id="pasteBox" placeholder="Paste here. Include the header row if you have one." aria-label="Pasted XP data"></textarea>
         <div id="pasteCfg" hidden>
           <div class="row">
-            <label>Name column <select id="pName"></select></label>
-            <label>XP column <select id="pXp"></select></label>
             <label>Mode <select id="pMode"><option value="add">Add this number to total XP</option><option value="set">Set total XP to this number</option></select></label>
           </div>
           <div id="pasteOut"></div>
@@ -267,7 +265,7 @@ let students = [], chars = [], settings = { xpPerPull: DEFAULT_XP_PER_PULL, roun
 const selected = new Set();
 let parsedRows = [];
 const keepSet = new Set();
-let pasteTable = null, pasteResult = [], lastPaste = null, xpTouched = false;
+let pasteResult = [], lastPaste = null;
 
 /* Google sign-in */
 const showErr = () => { $("#fbErr").hidden = false; $("#fbErr").textContent = "Couldn't load your data. Check that the Firestore rules were published and that the email in firebase-config.js matches the account you signed in with."; };
@@ -347,7 +345,7 @@ function renderStudents() {
   $("#selAll").checked = students.length > 0 && students.every(s => selected.has(s.id));
   for (const id of [...selected]) if (!students.some(s => s.id === id)) selected.delete(id);
   renderKeep();
-  if (pasteTable) previewPaste();
+  if ($("#pasteBox").value.trim()) previewPaste();
 }
 
 $("#studentList").addEventListener("click", async e => {
@@ -479,25 +477,13 @@ $("#newDay").onclick = async () => {
   } catch { say("#dayStatus", "That didn't save. Check your connection and try again."); }
 };
 
-/* paste XP */
+/* paste XP: the number before the slash ("105 / 160" -> 105), or the first number after the name */
 const toks = s => norm(String(s).replace(/[,.;:()\[\]"'\u2019\-_/]/g, " ")).split(" ").filter(Boolean);
-const NUM = /^\s*-?\d[\d,]*(\.\d+)?\s*(xp)?\s*$/i;
-const isNum = v => NUM.test(String(v ?? ""));
+const isNum = v => /^\s*-?\d[\d,]*(\.\d+)?\s*(xp)?\s*$/i.test(String(v ?? ""));
 const numOf = v => isNum(v) ? Number(String(v).replace(/[^0-9.\-]/g, "")) : NaN;
-function splitLine(line, delim) {
-  if (delim === "\t") return line.split("\t").map(x => x.trim());
-  if (delim === ",") {
-    const out = []; let cur = "", q = false;
-    for (let i = 0; i < line.length; i++) {
-      const ch = line[i];
-      if (q) { if (ch === '"' && line[i + 1] === '"') { cur += '"'; i++; } else if (ch === '"') q = false; else cur += ch; }
-      else if (ch === '"') q = true; else if (ch === ",") { out.push(cur.trim()); cur = ""; } else cur += ch;
-    }
-    out.push(cur.trim()); return out;
-  }
-  return line.trim().split(/\s{2,}/).map(x => x.trim());
-}
-// Which of your students does this text belong to? All of the student's name words must appear. The longest name wins.
+const isWord = w => /^[A-Za-z\u00C0-\u024F'\u2019-]+$/.test(w);
+const SLASH = /(?<![\d\/])(-?\d[\d,]*(?:\.\d+)?)\s*\/\s*\d[\d,]*(?:\.\d+)?(?![\d\/.])/;   // 105 / 160, not a date like 10/7/2026
+// Which of your students is in this text? All of the student's name words must appear. The longest name wins.
 function matchStudents(text) {
   const T = new Set(toks(text)); if (!T.size) return [];
   const hits = students.filter(s => { const st = toks(s.name); return st.length && st.every(w => T.has(w)); });
@@ -505,70 +491,50 @@ function matchStudents(text) {
   const best = Math.max(...hits.map(s => toks(s.name).length));
   return hits.filter(s => toks(s.name).length === best);
 }
-const nameText = (r, ni) => ni < 0 ? r.filter(c => !isNum(c)).join(" ") : (r[ni] || "");
-
-function parsePaste() {
-  const lines = $("#pasteBox").value.replace(/\r/g, "").split("\n").filter(l => l.trim());
-  if (!lines.length) { pasteTable = null; $("#pasteCfg").hidden = true; return; }
-  const delim = lines.some(l => l.includes("\t")) ? "\t" : lines.some(l => l.includes(",")) ? "," : "spaces";
-  const rows = lines.map(l => {
-    const parts = splitLine(l, delim);
-    if (delim === "spaces" && parts.length === 1) {            // "Maya Lopez 120" with single spaces
-      const m = l.trim().match(/^(.*?)[\s:=-]+(-?\d[\d,]*(?:\.\d+)?)\s*(?:xp)?$/i);
-      if (m) return [m[1].trim(), m[2]];
-    }
-    return parts;
-  });
-  const width = Math.max(...rows.map(r => r.length));
-  const hasHeader = rows.length > 1 && !rows[0].some(isNum) && rows.slice(1).some(r => r.some(isNum));
-  const labels = Array.from({ length: width }, (_, i) => (hasHeader && rows[0][i]) ? rows[0][i] : `Column ${i + 1}`);
-  const data = hasHeader ? rows.slice(1) : rows;
-  pasteTable = { labels, data, width, hasHeader };
-
-  // auto-pick the name column: whichever one matches the most of your students
-  let bestN = -1, bestScore = -1;
-  for (let c = 0; c < width; c++) { const sc = data.filter(r => matchStudents(nameText(r, c)).length === 1).length; if (sc > bestScore) { bestScore = sc; bestN = c; } }
-  if (bestScore <= 0) bestN = -1;
-  const wholeRow = data.filter(r => matchStudents(nameText(r, -1)).length === 1).length;
-  if (wholeRow > bestScore) bestN = -1;
-  $("#pName").innerHTML = `<option value="-1">Search the whole row</option>` + labels.map((l, i) => `<option value="${i}">${esc(l)}</option>`).join("");
-  $("#pXp").innerHTML = labels.map((l, i) => `<option value="${i}">${esc(l)}</option>`).join("");
-  $("#pName").value = String(bestN);
-  xpTouched = false; pickXpCol();
-  $("#pasteCfg").hidden = false; previewPaste();
-}
-// XP column: a header that says XP. If there are several, "Add" mode prefers a daily one and "Set" mode prefers a total one.
-function pickXpCol() {
-  if (!pasteTable || xpTouched) return;
-  const { labels, data, width, hasHeader } = pasteTable, mode = $("#pMode").value, ni = Number($("#pName").value);
-  let x = -1;
-  if (hasHeader) {
-    const xs = labels.map((l, i) => [l, i]).filter(([l]) => /xp/i.test(l));
-    const total = xs.filter(([l]) => /total|all.?time|lifetime|cumulative/i.test(l)), other = xs.filter(([l]) => !/total|all.?time|lifetime|cumulative/i.test(l));
-    const pick = mode === "set" ? (total[0] || other[0]) : (other[0] || total[0]);
-    if (pick) x = pick[1];
+// Split the paste into one record per person. A person can be one row, or a name on its own line with their numbers on the lines below.
+function readRecords(text) {
+  const nameLike = l => !/\d/.test(l) && (l.match(/[A-Za-z\u00C0-\u024F][A-Za-z\u00C0-\u024F'\u2019.-]*/g) || []).length >= 2;
+  const recs = []; let cur = null;
+  for (const raw of text.replace(/\r/g, "").split("\n")) {
+    const l = raw.trim(); if (!l) continue;
+    const hits = matchStudents(l);
+    if (hits.length) { cur = { first: l, hits, lines: [l] }; recs.push(cur); }
+    else if (nameLike(l)) { cur = { first: l, hits: [], lines: [l] }; recs.push(cur); }   // someone who isn't on your list
+    else if (cur) cur.lines.push(l);
   }
-  if (x < 0) for (let c = width - 1; c >= 0; c--) { if (c !== ni && data.filter(r => isNum(r[c])).length >= data.length / 2) { x = c; break; } }
-  if (x < 0) x = width - 1;
-  $("#pXp").value = String(x);
+  return recs;
+}
+function readRecord(rec) {
+  const s = rec.hits[0], body = rec.lines.slice(0, 2).join("\n");   // the name line plus the line under it, so a missing XP ("—") can't grab the next stat
+  const words = body.match(/\d{1,3}(?:,\d{3})+(?:\.\d+)?|[^\s,;|"]+/g) || [];
+  const at = []; words.forEach((w, wi) => toks(w).forEach(t => at.push({ t, wi })));
+  const st = toks(s.name), idx = st.map(w => (at.find(x => x.t === w) || { wi: 0 }).wi);
+  const first = Math.min(...idx), last = Math.max(...idx);
+  let xp = NaN;
+  const m = body.match(SLASH);
+  if (m) xp = numOf(m[1]);                                                                                      // number before the slash
+  for (let i = last + 1; i < words.length && !isFinite(xp); i++) if (isNum(words[i])) xp = numOf(words[i]);       // else first number after the name
+  for (let i = first - 1; i >= 0 && !isFinite(xp); i--) if (isNum(words[i])) xp = numOf(words[i]);               // else nearest one before
+  // who exactly is this? a first-name-only student also uses the line's full name, so two different Sams don't get mixed up
+  const key = st.length === 1 ? toks(rec.first.split(/\d/)[0]).sort().join(" ") : st.slice().sort().join(" ");
+  return { xp, key, text: rec.first };
 }
 
 function previewPaste() {
-  if (!pasteTable) return;
-  const ni = Number($("#pName").value), xi = Number($("#pXp").value), mode = $("#pMode").value;
-  const by = new Map(); let ignored = 0; const ambiguous = [], dups = new Set();
-  for (const r of pasteTable.data) {
-    const text = nameText(r, ni), hits = matchStudents(text);
-    if (!hits.length) { ignored++; continue; }
-    if (hits.length > 1) { ambiguous.push(text); continue; }
-    const xp = numOf(r[xi]);
-    if (!isFinite(xp)) { ignored++; continue; }
-    const e = by.get(hits[0].id) || { s: hits[0], rows: [] };
-    e.rows.push({ key: toks(text).sort().join(" "), text: text.trim(), xp }); by.set(hits[0].id, e);
+  const text = $("#pasteBox").value;
+  $("#pasteCfg").hidden = !text.trim();
+  if (!text.trim()) { pasteResult = []; return; }
+  const mode = $("#pMode").value, by = new Map(); let ignored = 0; const ambiguous = [], dups = new Set(), noNum = [];
+  for (const rec of readRecords(text)) {
+    if (!rec.hits.length) { if (rec.lines.some(l => /\d/.test(l))) ignored++; continue; }
+    if (rec.hits.length > 1) { ambiguous.push(rec.first.slice(0, 40)); continue; }
+    const r = readRecord(rec);
+    if (!isFinite(r.xp)) { noNum.push(rec.hits[0].name); continue; }
+    const e = by.get(rec.hits[0].id) || { s: rec.hits[0], rows: [] };
+    e.rows.push(r); by.set(rec.hits[0].id, e);
   }
   for (const [id, e] of [...by]) {
-    const distinct = new Set(e.rows.map(x => x.key));
-    if (distinct.size > 1) { ambiguous.push(`${e.s.name} could be ${[...new Set(e.rows.map(x => x.text))].slice(0, 3).join(" or ")}. Add their full name to your list.`); by.delete(id); continue; }
+    if (new Set(e.rows.map(x => x.key)).size > 1) { ambiguous.push(`${e.s.name} could be ${[...new Set(e.rows.map(x => x.text))].slice(0, 3).join(" or ")}. Add their full name to your list.`); by.delete(id); continue; }
     if (e.rows.length > 1) dups.add(e.s.name);
     e.xp = e.rows[e.rows.length - 1].xp;
   }
@@ -576,20 +542,19 @@ function previewPaste() {
   const missing = students.filter(s => !by.has(s.id)).map(s => s.name);
   const newTotal = m => mode === "add" ? (m.s.totalXp || 0) + m.xp : Math.max(0, m.xp);
   $("#pasteOut").innerHTML =
-    `<p><strong>Found ${pasteResult.length} of your ${students.length} students.</strong> ${ignored} other row${ignored === 1 ? "" : "s"} ignored.</p>` +
+    `<p><strong>Found ${pasteResult.length} of your ${students.length} students.</strong> ${ignored} other name${ignored === 1 ? "" : "s"} ignored.</p>` +
     (pasteResult.length ? `<table class="ptable"><tr><th>Student</th><th>XP now</th><th>${mode === "add" ? "Adding" : "Setting to"}</th><th>New total</th></tr>` +
       pasteResult.map(m => `<tr><td>${esc(m.s.name)}</td><td>${m.s.totalXp || 0}</td><td>${m.xp}</td><td><strong>${newTotal(m)}</strong></td></tr>`).join("") + `</table>` : "") +
-    (dups.size ? `<p class="pwarn">These students appear more than once, so the last row was used: ${esc([...dups].join(", "))}</p>` : "") +
+    (dups.size ? `<p class="pwarn">These students appear more than once, so the last one was used: ${esc([...dups].join(", "))}</p>` : "") +
+    (noNum.length ? `<p class="pwarn">No number found next to: ${esc(noNum.join(", "))}</p>` : "") +
     (ambiguous.length ? `<p class="pwarn">Skipped because it was unclear who they are: ${esc(ambiguous.slice(0, 5).join("; "))}</p>` : "") +
     (missing.length && pasteResult.length ? `<p class="muted">Not found in this paste: ${esc(missing.join(", "))}</p>` : "") +
     (mode === "add" ? `<p class="muted">Adding stacks onto what they have, so only apply each day's paste once.</p>` : "");
   $("#pasteApply").disabled = !pasteResult.length;
 }
-$("#pasteBox").addEventListener("input", parsePaste);
-$("#pName").addEventListener("change", () => { pickXpCol(); previewPaste(); });
-$("#pXp").addEventListener("change", () => { xpTouched = true; previewPaste(); });
-$("#pMode").addEventListener("change", () => { pickXpCol(); previewPaste(); });
-$("#pasteClear").onclick = () => { $("#pasteBox").value = ""; parsePaste(); say("#pasteStatus", ""); };
+$("#pasteBox").addEventListener("input", previewPaste);
+$("#pMode").addEventListener("change", previewPaste);
+$("#pasteClear").onclick = () => { $("#pasteBox").value = ""; previewPaste(); say("#pasteStatus", ""); };
 $("#pasteApply").onclick = async () => {
   if (!pasteResult.length) return;
   const mode = $("#pMode").value, b = writeBatch(db); const prev = [];
@@ -600,7 +565,7 @@ $("#pasteApply").onclick = async () => {
   try { await b.commit(); } catch { return say("#pasteStatus", "That didn't save. Check your connection and try again."); }
   lastPaste = prev; $("#pasteUndo").hidden = false;
   say("#pasteStatus", `Updated ${prev.length} student${prev.length === 1 ? "" : "s"}.`);
-  $("#pasteBox").value = ""; parsePaste();   // cleared so the same paste can't be applied twice by accident
+  $("#pasteBox").value = ""; previewPaste();   // cleared so the same paste can't be applied twice by accident
 };
 $("#pasteUndo").onclick = async () => {
   if (!lastPaste) return;
