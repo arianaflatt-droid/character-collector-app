@@ -173,7 +173,7 @@
 
 <script type="module">
 import { db, DEFAULT_WEIGHTS, DEFAULT_XP_PER_PULL, DEFAULT_ROUND_XP, DEFAULT_KEEPS, pullInfo, pickWeighted, esc, firstName } from "./common.js";
-import { doc, collection, onSnapshot, runTransaction, increment } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { doc, collection, onSnapshot, runTransaction, increment, query, where, getDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 window.__loaded = true;
 const $ = s => document.querySelector(s);
@@ -210,11 +210,25 @@ document.addEventListener("error", e => {
 /*DATA-START*/
 function startListeners() {
   if (!id) { setMsg("This page needs your personal link. Ask your teacher for it."); return; }
+  // Only load characters from the series that are turned on for this student (saves a lot of database reads).
+  let seriesKey = null, unsubs = [], parts = [];
+  const watchSeries = list => {
+    const key = JSON.stringify([...list].sort());
+    if (key === seriesKey) return; seriesKey = key;
+    unsubs.forEach(u => u()); unsubs = []; parts = [];
+    chars = chars.filter(c => list.includes(c.series));
+    if (!list.length) { chars = []; render(); return; }
+    for (let i = 0; i < list.length; i += 30) {              // a query can match up to 30 series at once
+      const idx = parts.length; parts.push([]);
+      unsubs.push(onSnapshot(query(collection(db, "characters"), where("series", "in", list.slice(i, i + 30))),
+        snap => { parts[idx] = snap.docs.map(d => ({ id: d.id, ...d.data() })); chars = parts.flat(); render(); },
+        () => setMsg("Can't load the characters right now. Try refreshing the page.")));
+    }
+  };
   onSnapshot(doc(db, "students", id), snap => {
     if (!snap.exists()) { student = null; setMsg("We can't find this binder. Ask your teacher for your link."); return; }
-    student = { id, ...snap.data() }; render();
+    student = { id, ...snap.data() }; watchSeries(student.enabledSeries || []); render();
   }, () => setMsg("Can't connect right now. Try refreshing the page."));
-  onSnapshot(collection(db, "characters"), snap => { chars = snap.docs.map(d => ({ id: d.id, ...d.data() })); render(); });
   onSnapshot(doc(db, "config", "main"), snap => {
     const d = snap.exists() ? snap.data() : {};
     settings = {
@@ -226,6 +240,10 @@ function startListeners() {
     };
     render();
   });
+}
+async function fetchChar(cid) {
+  const snap = await getDoc(doc(db, "characters", cid));
+  return snap.exists() ? { id: cid, ...snap.data() } : null;
 }
 
 // Spend one pull. Earned pulls go to the "keepers" tray to be decided on; teacher bonus pulls go straight into the binder.
@@ -286,6 +304,8 @@ async function withRetry(fn) {
 { const p = commitPull, k = commitKeep, r = commitRelease;
   commitPull = a => withRetry(() => p(a)); commitKeep = a => withRetry(() => k(a)); commitRelease = a => withRetry(() => r(a)); }
 
+const extraChars = {}, asked = new Set();
+const charById = cid => chars.find(c => c.id === cid) || extraChars[cid];
 const poolOf = () => chars.filter(c => (student.enabledSeries || []).includes(c.series));
 const rkOf = t => t.rk || ("r" + t.round);                 // older pulls used "r0", "r1"...
 const keptIn = rk => (student.keeps || {})[rk] || 0;
@@ -333,11 +353,12 @@ function renderTray() {
   if (!tray.length) { $("#tray").innerHTML = ""; return; }
   const order = t => (t.day || 0) * 1000 + (t.block !== undefined ? t.block : (t.round || 0));
   const keys = [...new Set(tray.map(rkOf))].sort((a, b) => order(tray.find(t => rkOf(t) === a)) - order(tray.find(t => rkOf(t) === b)));
+  for (const t of tray) if (!charById(t.id) && !asked.has(t.id)) { asked.add(t.id); fetchChar(t.id).then(c => { if (c) { extraChars[t.id] = c; render(); } }).catch(() => asked.delete(t.id)); }
   $("#tray").innerHTML = keys.map(rk => {
     const items = tray.filter(t => rkOf(t) === rk), kept = keptIn(rk), full = kept >= K;
     return `<div class="round"><h3>${esc(roundLabel(items[0]))}: ${kept} of ${K} kept${full ? ". This round is full, so release the rest." : ""}</h3><div class="grid">` +
       items.map(t => {
-        const c = chars.find(x => x.id === t.id) || { name: "Missing", rarity: "Common", imageUrl: "" };
+        const c = charById(t.id) || { name: "Missing", rarity: "Common", imageUrl: "" };
         const own = (student.collection || {})[t.id] || 0;
         return `<div class="trayitem" data-u="${esc(t.u)}">${cardHTML(c, 0, false)}
           <div class="own">${own ? `You already have ${own}` : "New for your binder!"}</div>
@@ -357,7 +378,7 @@ $("#dayOk").addEventListener("click", () => { try { localStorage.setItem("cc-day
 
 $("#tray").addEventListener("click", async e => {
   const b = e.target.closest("button"), row = e.target.closest(".trayitem"); if (!b || !row) return;
-  const u = row.dataset.u, t = (student.tray || []).find(x => x.u === u), c = chars.find(x => x.id === t?.id);
+  const u = row.dataset.u, t = (student.tray || []).find(x => x.u === u), c = charById(t?.id);
   b.disabled = true;
   try {
     if (b.classList.contains("keep")) { await commitKeep(u); toast(`Kept ${c?.name || "it"}!`); }
@@ -375,8 +396,8 @@ async function doPull() {
     showReveal(pick, res);
   } catch (e) {
     console.error(e);
-    const code = e?.code || e?.message || "unknown";
-    pullError = `That pull didn't go through. Tell your teacher this code: ${code}`;
+    const code = e?.code || "error", detail = String(e?.message || "").replace(/\s+/g, " ").slice(0, 160);
+    pullError = `That pull didn't go through. Tell your teacher this code: ${code}${detail ? " (" + detail + ")" : ""}`;
     toast("That pull didn't go through");
     setTimeout(() => { pullError = ""; render(); }, 20000);
   } finally { pulling = false; render(); }
