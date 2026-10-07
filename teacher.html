@@ -12,7 +12,10 @@
 <style>
   body{background:var(--paper)}
   header{background:var(--binder);color:#fff;padding:16px 20px}
+  header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
   header h1{font-size:1.8rem}
+  .who{display:flex;align-items:center;gap:10px;font-weight:700}
+  .err{background:#fde8e6;border:2px solid #b3261e;color:#7a1810;border-radius:12px;padding:10px 14px;margin-bottom:14px;font-weight:700}
   .wrap{max-width:1100px;margin:0 auto;padding:18px}
   .tabs{display:flex;gap:8px;margin:0 0 18px;flex-wrap:wrap}
   .tab{border:3px solid var(--ink);background:#fff;border-radius:12px;padding:8px 18px;font-weight:800}
@@ -45,15 +48,17 @@
 </head>
 <body>
 <div class="gate" id="gate">
-  <h2>Teacher passcode</h2>
-  <input type="password" id="pass" aria-label="Passcode" autocomplete="off">
-  <button class="btn" id="enter">Open control desk</button>
+  <h2>Teacher sign in</h2>
+  <p class="muted">Sign in with your Google account to manage students and characters.</p>
+  <button class="btn" id="signin">Sign in with Google</button>
   <p class="status" id="gateMsg"></p>
+  <button class="btn alt" id="gateOut" hidden>Use a different account</button>
 </div>
 
 <div id="app" hidden>
-  <header><h1>Binder Control Desk</h1></header>
+  <header><h1>Binder Control Desk</h1><div class="who"><span id="whoEmail"></span><button class="btn alt" id="signout">Sign out</button></div></header>
   <div class="wrap">
+    <div class="err" id="fbErr" hidden></div>
     <div class="tabs" role="tablist">
       <button class="tab" role="tab" data-tab="students" aria-selected="true">Students</button>
       <button class="tab" role="tab" data-tab="chars" aria-selected="false">Characters</button>
@@ -90,6 +95,16 @@
         </div>
         <p class="muted" style="margin:6px 0 0">Tip: use "Add" for daily files so XP keeps stacking up toward new rounds. Use "Set" for a running total.</p>
         <p class="status" id="xpStatus"></p>
+      </div>
+
+      <div class="box">
+        <h2>Student links</h2>
+        <p class="muted">Every student has their own private link (use "Copy link" on their row). To get them all at once, copy the list and paste it into a Google Sheet, or download it as a file.</p>
+        <div class="row">
+          <button class="btn" id="copyAll">Copy all links</button>
+          <button class="btn alt" id="dlLinks">Download as CSV</button>
+          <span class="status" id="linkStatus"></span>
+        </div>
       </div>
 
       <div class="box">
@@ -172,8 +187,9 @@
 </div>
 
 <script type="module">
-import { db, RARITIES, DEFAULT_WEIGHTS, DEFAULT_XP_PER_PULL, DEFAULT_ROUND_XP, DEFAULT_KEEPS, pullInfo, esc } from "./common.js";
-import { TEACHER_PASSCODE } from "./firebase-config.js";
+import { app, db, RARITIES, DEFAULT_WEIGHTS, DEFAULT_XP_PER_PULL, DEFAULT_ROUND_XP, DEFAULT_KEEPS, pullInfo, esc } from "./common.js";
+import { TEACHER_EMAIL } from "./firebase-config.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { collection, doc, onSnapshot, addDoc, updateDoc, deleteDoc, setDoc, writeBatch, arrayUnion, arrayRemove, increment } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const $ = s => document.querySelector(s);
@@ -181,11 +197,34 @@ let students = [], chars = [], settings = { xpPerPull: DEFAULT_XP_PER_PULL, roun
 const selected = new Set();
 let parsedRows = [];
 
-/* gate */
-function unlock() { $("#gate").hidden = true; $("#app").hidden = false; start(); }
-$("#enter").onclick = () => { if ($("#pass").value === TEACHER_PASSCODE) { sessionStorage.tc = "1"; unlock(); } else $("#gateMsg").textContent = "That passcode isn't right."; };
-$("#pass").addEventListener("keydown", e => { if (e.key === "Enter") $("#enter").click(); });
-if (sessionStorage.tc === "1") unlock();
+/* Google sign-in */
+const auth = getAuth(app);
+let unsubs = [];
+const isTeacher = u => !!(u && u.email && String(u.email).toLowerCase() === String(TEACHER_EMAIL).toLowerCase());
+onAuthStateChanged(auth, u => {
+  if (isTeacher(u)) {
+    $("#gate").hidden = true; $("#app").hidden = false; $("#whoEmail").textContent = u.email;
+    if (!unsubs.length) start();
+  } else {
+    unsubs.forEach(f => f()); unsubs = [];
+    $("#app").hidden = true; $("#gate").hidden = false; $("#gateOut").hidden = !u;
+    $("#gateMsg").textContent = u ? `${u.email} isn't the teacher account for this site.` : "";
+  }
+});
+$("#signin").onclick = async () => {
+  if (String(TEACHER_EMAIL).startsWith("YOUR_")) return say("#gateMsg", "Put your email in firebase-config.js first (TEACHER_EMAIL).");
+  try { await signInWithPopup(auth, new GoogleAuthProvider()); }
+  catch (e) {
+    say("#gateMsg", e.code === "auth/unauthorized-domain" ? "This website address isn't approved in Firebase yet. Add it under Authentication > Settings > Authorized domains."
+      : e.code === "auth/popup-blocked" ? "Your browser blocked the sign-in window. Allow pop-ups for this site and try again."
+      : e.code === "auth/popup-closed-by-user" || e.code === "auth/cancelled-popup-request" ? ""
+      : e.code === "auth/operation-not-allowed" ? "Google sign-in isn't turned on in Firebase yet (Authentication > Sign-in method)."
+      : "Sign-in didn't work. Try again.");
+  }
+};
+$("#signout").onclick = () => signOut(auth);
+$("#gateOut").onclick = () => signOut(auth);
+const showErr = () => { $("#fbErr").hidden = false; $("#fbErr").textContent = "Couldn't load your data. Check that the Firestore rules were published and that the email in firebase-config.js matches the account you signed in with."; };
 
 /* tabs */
 document.querySelectorAll(".tab").forEach(t => t.onclick = () => {
@@ -194,14 +233,17 @@ document.querySelectorAll(".tab").forEach(t => t.onclick = () => {
 });
 
 function start() {
+  $("#fbErr").hidden = true;
   $("#cRarity").innerHTML = RARITIES.map(r => `<option>${r}</option>`).join("");
-  onSnapshot(collection(db, "students"), s => { students = s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => a.name.localeCompare(b.name)); renderStudents(); });
-  onSnapshot(collection(db, "characters"), s => { chars = s.docs.map(d => ({ id: d.id, ...d.data() })); renderChars(); renderStudents(); });
-  onSnapshot(doc(db, "config", "main"), s => {
-    const d = s.exists() ? s.data() : {};
-    settings = { xpPerPull: Number(d.xpPerPull) || DEFAULT_XP_PER_PULL, roundXp: Number(d.roundXp) || DEFAULT_ROUND_XP, keepsPerRound: d.keepsPerRound === undefined ? DEFAULT_KEEPS : Math.max(0, Number(d.keepsPerRound)), weights: { ...DEFAULT_WEIGHTS, ...(d.weights || {}) } };
-    renderSettings(); renderStudents();
-  });
+  unsubs = [
+    onSnapshot(collection(db, "students"), s => { students = s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => a.name.localeCompare(b.name)); renderStudents(); }, showErr),
+    onSnapshot(collection(db, "characters"), s => { chars = s.docs.map(d => ({ id: d.id, ...d.data() })); renderChars(); renderStudents(); }, showErr),
+    onSnapshot(doc(db, "config", "main"), s => {
+      const d = s.exists() ? s.data() : {};
+      settings = { xpPerPull: Number(d.xpPerPull) || DEFAULT_XP_PER_PULL, roundXp: Number(d.roundXp) || DEFAULT_ROUND_XP, keepsPerRound: d.keepsPerRound === undefined ? DEFAULT_KEEPS : Math.max(0, Number(d.keepsPerRound)), weights: { ...DEFAULT_WEIGHTS, ...(d.weights || {}) } };
+      renderSettings(); renderStudents();
+    }, showErr)
+  ];
 }
 const allSeries = () => [...new Set(chars.map(c => c.series))].sort((a, b) => a.localeCompare(b));
 const linkFor = id => new URL("index.html?s=" + id, location.href).href;
@@ -269,6 +311,20 @@ async function bulkSeries(on) {
 }
 $("#bulkOn").onclick = () => bulkSeries(true);
 $("#bulkOff").onclick = () => bulkSeries(false);
+
+const linkRows = () => students.map(s => [s.name, linkFor(s.id)]);
+$("#copyAll").onclick = async () => {
+  if (!students.length) return say("#linkStatus", "Add students first.");
+  try { await navigator.clipboard.writeText(linkRows().map(r => r.join("\t")).join("\n")); say("#linkStatus", "Copied! Paste into a Google Sheet."); }
+  catch { say("#linkStatus", "Couldn't copy. Try the CSV download."); }
+};
+$("#dlLinks").onclick = () => {
+  if (!students.length) return say("#linkStatus", "Add students first.");
+  const q = v => '"' + String(v).replace(/"/g, '""') + '"';
+  const csv = "Name,Link\n" + linkRows().map(r => r.map(q).join(",")).join("\n");
+  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); a.download = "student-links.csv"; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+};
 
 const newStudent = name => ({ name, totalXp: 0, bonusPulls: 0, bonusUsed: 0, pullsUsed: 0, enabledSeries: [], collection: {}, tray: [], keeps: {}, created: Date.now() });
 $("#addStudent").onclick = async () => {
