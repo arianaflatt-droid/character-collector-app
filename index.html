@@ -53,6 +53,7 @@
   .btn:disabled{opacity:.45;cursor:not-allowed;box-shadow:none}
   .daybanner{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;background:var(--sun);border:3px solid var(--ink);border-radius:14px;padding:10px 14px;margin-bottom:20px;font-weight:800;box-shadow:0 4px 0 var(--ink)}
   .daybanner .btn{padding:6px 14px;box-shadow:0 3px 0 var(--ink)}
+  .ver{margin:28px 0 0;text-align:center;font-size:.75rem;color:var(--muted);opacity:.7}
   .roundtext{margin:6px 0 0;font-weight:700;color:var(--muted)}
   .trayBox{margin-top:26px;background:#fff8e1;border:3px solid var(--sun);border-radius:18px;padding:16px 18px 20px}
   .trayBox h2{font-size:1.5rem}
@@ -151,6 +152,7 @@
       <div id="tray"></div>
     </section>
     <div id="binder"></div>
+    <p class="ver" id="ver"></p>
   </main>
 </div>
 
@@ -177,6 +179,7 @@ import { doc, collection, onSnapshot, updateDoc, increment, arrayUnion, arrayRem
 
 window.__loaded = true;
 const $ = s => document.querySelector(s);
+const VERSION = "v5 plain-saves";
 const id = new URLSearchParams(location.search).get("s");
 const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const RANK = { Legendary: 0, Epic: 1, Rare: 2, Common: 3 };
@@ -382,7 +385,7 @@ async function doPull() {
   } catch (e) {
     console.error(e);
     const code = e?.code || "error", detail = String(e?.message || "").replace(/\s+/g, " ").slice(0, 160);
-    pullError = `That pull didn't go through. Tell your teacher this code: ${code}${detail ? " (" + detail + ")" : ""}`;
+    pullError = `That pull didn't go through. Tell your teacher this code: ${code}${detail ? " (" + detail + ")" : ""} [page ${VERSION}]`;
     toast("That pull didn't go through");
     setTimeout(() => { pullError = ""; render(); }, 20000);
   } finally { pulling = false; render(); }
@@ -428,6 +431,7 @@ $("#kLater").addEventListener("click", () => {
 });
 document.addEventListener("keydown", e => { if (e.key === "Escape") closeOv(); });
 
+$("#ver").textContent = "Page " + VERSION;
 startListeners();
 </script>
 </body>
