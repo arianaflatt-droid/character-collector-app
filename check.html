@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Connection check</title>
+<style>
+  body{font-family:system-ui,sans-serif;max-width:720px;margin:24px auto;padding:0 16px;color:#1d2147}
+  h1{font-size:1.5rem} li{margin:10px 0;list-style:none;padding:10px 12px;border-radius:10px;border:2px solid #e1dcf2}
+  li.ok{background:#e9f9f1;border-color:#2fbf88} li.bad{background:#fde8e6;border-color:#b3261e} li.run{background:#fff8da;border-color:#ffd23f}
+  small{display:block;color:#555;margin-top:4px;word-break:break-word} ul{padding:0}
+</style>
+</head>
+<body>
+<h1>Connection check</h1>
+<p id="intro">Running tests… this takes up to a minute. Then take a picture of this whole page and send it to Claude.</p>
+<ul id="out"></ul>
+<script type="module">
+import { db } from "./common.js";
+import { firebaseConfig } from "./firebase-config.js";
+import { doc, getDoc, getDocs, updateDoc, runTransaction, collection, query, limit } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+const id = new URLSearchParams(location.search).get("s");
+const out = document.getElementById("out");
+function add(label) { const li = document.createElement("li"); li.className = "run"; li.innerHTML = `<b>${label}</b><small>running…</small>`; out.appendChild(li); return li; }
+function done(li, ok, text) { li.className = ok ? "ok" : "bad"; li.querySelector("small").textContent = text; }
+async function step(label, fn) {
+  const li = add(label), t = performance.now();
+  try {
+    const r = await Promise.race([fn(), new Promise((_, no) => setTimeout(() => no(Object.assign(new Error("no answer after 25 seconds"), { code: "timed-out" })), 25000))]);
+    done(li, true, `worked in ${Math.round(performance.now() - t)} ms${r ? " · " + r : ""}`);
+  } catch (e) { done(li, false, `${e.code || "error"}: ${String(e.message).replace(/\s+/g, " ").slice(0, 300)}  (after ${Math.round(performance.now() - t)} ms)`); }
+}
+const info = add("This device");
+done(info, true, `project: ${firebaseConfig.projectId} · online: ${navigator.onLine} · ${location.host}`);
+if (!id) { done(add("Student link"), false, "Open this page with a student's link: check.html?s=THEIR-ID (copy their link and change index.html to check.html)."); }
+else {
+  await step("1. Read the settings", async () => { const s = await getDoc(doc(db, "config", "main")); return s.exists() ? "settings found" : "no settings saved yet (fine)"; });
+  await step("2. Read this student", async () => { const s = await getDoc(doc(db, "students", id)); if (!s.exists()) throw new Error("no student with this id"); const d = s.data(); return `${d.name} · ${d.totalXp || 0} XP · ${(d.tray || []).length} cards waiting`; });
+  await step("3. Read a few characters", async () => { const s = await getDocs(query(collection(db, "characters"), limit(3))); return `${s.size} characters read`; });
+  await step("4. Simple save", async () => { await updateDoc(doc(db, "students", id), { lastPull: Date.now() }); });
+  await step("5. Save inside a transaction (what a pull does)", async () => {
+    const ref = doc(db, "students", id);
+    await runTransaction(db, async tx => { const s = await tx.get(ref); if (!s.exists()) throw new Error("gone"); tx.update(ref, { lastPull: Date.now() }); });
+  });
+  document.getElementById("intro").textContent = "Done. Take a picture of this whole page and send it to Claude.";
+}
+</script>
+</body>
+</html>

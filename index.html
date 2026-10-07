@@ -291,18 +291,6 @@ async function commitRelease(u) {
 }
 /*DATA-END*/
 
-// If the database says it's busy for a moment, try again a couple of times before giving up.
-async function withRetry(fn) {
-  const transient = new Set(["resource-exhausted", "unavailable", "aborted", "deadline-exceeded", "internal"]);
-  let last;
-  for (let i = 0; i < 3; i++) {
-    try { return await fn(); }
-    catch (e) { last = e; if (!transient.has(e?.code)) throw e; await new Promise(r => setTimeout(r, 800 * (i + 1))); }
-  }
-  throw last;
-}
-{ const p = commitPull, k = commitKeep, r = commitRelease;
-  commitPull = a => withRetry(() => p(a)); commitKeep = a => withRetry(() => k(a)); commitRelease = a => withRetry(() => r(a)); }
 
 const extraChars = {}, asked = new Set();
 const charById = cid => chars.find(c => c.id === cid) || extraChars[cid];
@@ -392,7 +380,7 @@ async function doPull() {
   pulling = true; pullError = ""; $("#pull").disabled = true;
   try {
     const pick = pickWeighted(pool, settings.weights);
-    const res = await Promise.race([commitPull(pick), new Promise((_, no) => setTimeout(() => no(new Error("timed-out")), 15000))]);
+    const res = await Promise.race([commitPull(pick), new Promise((_, no) => setTimeout(() => no(Object.assign(new Error("No answer from the database after 40 seconds"), { code: "timed-out" })), 40000))]);
     showReveal(pick, res);
   } catch (e) {
     console.error(e);
