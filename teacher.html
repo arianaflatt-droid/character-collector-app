@@ -97,10 +97,15 @@
       <div class="box">
         <h2>Today</h2>
         <p id="dayInfo" style="margin:0 0 8px;font-weight:700"></p>
-        <p class="muted" style="margin:0 0 10px">Starting a new day gives every student a fresh set of keeps. Their pulls and what they've already kept stay as they are.</p>
+        <p class="muted" style="margin:0 0 10px">A new day gives every student a fresh set of keeps and can start everyone's XP back at 0. What they've already kept stays in their binder.</p>
+        <div class="row" style="flex-direction:column;align-items:flex-start">
+          <label><input type="checkbox" id="dayReset" checked> Reset everyone's XP to 0</label>
+          <label><input type="checkbox" id="dayKeep" checked> Keep pulls students didn't use for tomorrow</label>
+          <label><input type="checkbox" id="dayRelease"> Release cards students haven't decided on yet</label>
+        </div>
         <div class="row">
           <button class="btn" id="newDay">Start new day</button>
-          <label><input type="checkbox" id="dayRelease"> Also release anything students haven't decided on yet</label>
+          <button class="btn alt" id="resetXp">Just reset XP to 0 now</button>
         </div>
         <p class="status" id="dayStatus"></p>
       </div>
@@ -135,7 +140,7 @@
         <textarea id="pasteBox" placeholder="Paste here. Include the header row if you have one." aria-label="Pasted XP data"></textarea>
         <div id="pasteCfg" hidden>
           <div class="row">
-            <label>Mode <select id="pMode"><option value="add">Add this number to total XP</option><option value="set">Set total XP to this number</option></select></label>
+            <label>Mode <select id="pMode"><option value="add">Add this number to their XP</option><option value="set">Set total XP to this number</option></select></label>
           </div>
           <div id="pasteOut"></div>
           <div class="row">
@@ -459,11 +464,20 @@ function renderDay() {
   const when = settings.dayStartedAt ? new Date(settings.dayStartedAt).toLocaleString([], { weekday: "long", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
   $("#dayInfo").textContent = `Day ${settings.day}${when ? ` (started ${when})` : ""}`;
 }
+// Starts everyone's XP back at 0. Pulls that were earned but not used can be kept ("carried") for later.
+async function resetAllXp(keepUnused) {
+  for (let i = 0; i < students.length; i += 400) {
+    const b = writeBatch(db);
+    students.slice(i, i + 400).forEach(s => b.update(doc(db, "students", s.id), { totalXp: 0, pullsUsed: 0, carry: keepUnused ? (s.carry || 0) + pullInfo(s, settings).fromXp : 0 }));
+    await b.commit();
+  }
+}
 $("#newDay").onclick = async () => {
-  const release = $("#dayRelease").checked;
-  if (!confirm(`Start day ${settings.day + 1}? Everyone gets a fresh ${settings.keepsPerRound} keeps.` + (release ? "\n\nCards students haven't decided on will be released." : ""))) return;
+  const release = $("#dayRelease").checked, reset = $("#dayReset").checked, keep = $("#dayKeep").checked;
+  if (!confirm(`Start day ${settings.day + 1}?\n\nEveryone gets a fresh ${settings.keepsPerRound} keeps.` + (reset ? `\nEveryone's XP goes back to 0${keep ? ", and pulls they didn't use carry over" : ", and pulls they didn't use are lost"}.` : "") + (release ? "\nCards students haven't decided on will be released." : ""))) return;
   try {
     await setDoc(doc(db, "config", "main"), { day: settings.day + 1, dayStartedAt: Date.now() }, { merge: true });
+    if (reset) await resetAllXp(keep);
     let released = 0;
     if (release) {
       const waiting = students.filter(s => (s.tray || []).length);
@@ -473,16 +487,22 @@ $("#newDay").onclick = async () => {
         await b.commit();
       }
     }
-    say("#dayStatus", `Day ${settings.day + 1} started.` + (release ? ` Released ${released} undecided card${released === 1 ? "" : "s"}.` : ""));
+    say("#dayStatus", `Day ${settings.day + 1} started.` + (reset ? " XP reset to 0." : "") + (release ? ` Released ${released} undecided card${released === 1 ? "" : "s"}.` : ""));
   } catch { say("#dayStatus", "That didn't save. Check your connection and try again."); }
+};
+$("#resetXp").onclick = async () => {
+  const keep = $("#dayKeep").checked;
+  if (!confirm(`Set everyone's XP back to 0?${keep ? "\n\nPulls they earned but didn't use will carry over." : "\n\nPulls they earned but didn't use will be lost."}`)) return;
+  try { await resetAllXp(keep); say("#dayStatus", "Everyone's XP is back at 0. Paste today's XP with \"Add\" to give new pulls."); }
+  catch { say("#dayStatus", "That didn't save. Check your connection and try again."); }
 };
 
 /* paste XP: the number before the slash ("105 / 160" -> 105), or the first number after the name */
-const toks = s => norm(String(s).replace(/[,.;:()\[\]"'\u2019\-_/]/g, " ")).split(" ").filter(Boolean);
+const toks = s => norm(String(s).normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[,.;:()\[\]"'\u2019\-_/]/g, " ")).split(" ").filter(Boolean);
 const isNum = v => /^\s*-?\d[\d,]*(\.\d+)?\s*(xp)?\s*$/i.test(String(v ?? ""));
 const numOf = v => isNum(v) ? Number(String(v).replace(/[^0-9.\-]/g, "")) : NaN;
 const isWord = w => /^[A-Za-z\u00C0-\u024F'\u2019-]+$/.test(w);
-const SLASH = /(?<![\d\/])(-?\d[\d,]*(?:\.\d+)?)\s*\/\s*\d[\d,]*(?:\.\d+)?(?![\d\/.])/;   // 105 / 160, not a date like 10/7/2026
+const SLASH = /(?<![\d\/\u2044\u2215\uFF0F])(-?\d[\d,]*(?:\.\d+)?)\s*[\/\u2044\u2215\uFF0F]\s*\d[\d,]*(?:\.\d+)?(?![\d\/\u2044\u2215\uFF0F.])/;   // 105 / 160 (any kind of slash), not a date like 10/7/2026
 // Which of your students is in this text? All of the student's name words must appear. The longest name wins.
 function matchStudents(text) {
   const T = new Set(toks(text)); if (!T.size) return [];
@@ -493,7 +513,7 @@ function matchStudents(text) {
 }
 // Split the paste into one record per person. A person can be one row, or a name on its own line with their numbers on the lines below.
 function readRecords(text) {
-  const nameLike = l => !/\d/.test(l) && (l.match(/[A-Za-z\u00C0-\u024F][A-Za-z\u00C0-\u024F'\u2019.-]*/g) || []).length >= 2;
+  const nameLike = l => l.length < 60 && /^[A-Z\u00C0-\u00DE][\p{L}'\u2019.-]*(?:\s+(?:[A-Z\u00C0-\u00DE][\p{L}'\u2019.-]*|de|la|del|van|von|da|di|bin|al)){1,4}$/u.test(l);
   const recs = []; let cur = null;
   for (const raw of text.replace(/\r/g, "").split("\n")) {
     const l = raw.trim(); if (!l) continue;
@@ -505,19 +525,20 @@ function readRecords(text) {
   return recs;
 }
 function readRecord(rec) {
-  const s = rec.hits[0], body = rec.lines.slice(0, 2).join("\n");   // the name line plus the line under it, so a missing XP ("—") can't grab the next stat
-  const words = body.match(/\d{1,3}(?:,\d{3})+(?:\.\d+)?|[^\s,;|"]+/g) || [];
+  const s = rec.hits[0], core = rec.lines.filter(l => !/@/.test(l)).slice(0, 3);               // the name line and the next couple of lines (email lines skipped)
+  const full = core.join("\n"), head = core.slice(0, 2).join("\n");
+  const words = head.match(/\d{1,3}(?:,\d{3})+(?:\.\d+)?|[^\s,;|"]+/g) || [];
   const at = []; words.forEach((w, wi) => toks(w).forEach(t => at.push({ t, wi })));
   const st = toks(s.name), idx = st.map(w => (at.find(x => x.t === w) || { wi: 0 }).wi);
   const first = Math.min(...idx), last = Math.max(...idx);
-  let xp = NaN;
-  const m = body.match(SLASH);
-  if (m) xp = numOf(m[1]);                                                                                      // number before the slash
-  for (let i = last + 1; i < words.length && !isFinite(xp); i++) if (isNum(words[i])) xp = numOf(words[i]);       // else first number after the name
-  for (let i = first - 1; i >= 0 && !isFinite(xp); i--) if (isNum(words[i])) xp = numOf(words[i]);               // else nearest one before
+  let xp = NaN, src = "";
+  const m = full.match(SLASH);
+  if (m) { xp = numOf(m[1]); src = m[0].replace(/\s+/g, " "); }                                              // the number before the slash
+  for (let i = last + 1; i < words.length && !isFinite(xp); i++) if (isNum(words[i])) { xp = numOf(words[i]); src = words[i]; }   // else the first number after the name
+  for (let i = first - 1; i >= 0 && !isFinite(xp); i--) if (isNum(words[i])) { xp = numOf(words[i]); src = words[i]; }            // else the nearest one before
   // who exactly is this? a first-name-only student also uses the line's full name, so two different Sams don't get mixed up
   const key = st.length === 1 ? toks(rec.first.split(/\d/)[0]).sort().join(" ") : st.slice().sort().join(" ");
-  return { xp, key, text: rec.first };
+  return { xp, src, key, text: rec.first };
 }
 
 function previewPaste() {
@@ -529,24 +550,25 @@ function previewPaste() {
     if (!rec.hits.length) { if (rec.lines.some(l => /\d/.test(l))) ignored++; continue; }
     if (rec.hits.length > 1) { ambiguous.push(rec.first.slice(0, 40)); continue; }
     const r = readRecord(rec);
-    if (!isFinite(r.xp)) { noNum.push(rec.hits[0].name); continue; }
+    if (!isFinite(r.xp)) { noNum.push(rec.hits[0]); continue; }
     const e = by.get(rec.hits[0].id) || { s: rec.hits[0], rows: [] };
     e.rows.push(r); by.set(rec.hits[0].id, e);
   }
   for (const [id, e] of [...by]) {
     if (new Set(e.rows.map(x => x.key)).size > 1) { ambiguous.push(`${e.s.name} could be ${[...new Set(e.rows.map(x => x.text))].slice(0, 3).join(" or ")}. Add their full name to your list.`); by.delete(id); continue; }
     if (e.rows.length > 1) dups.add(e.s.name);
-    e.xp = e.rows[e.rows.length - 1].xp;
+    e.xp = e.rows[e.rows.length - 1].xp; e.src = e.rows[e.rows.length - 1].src;
   }
   pasteResult = [...by.values()].sort((a, b) => a.s.name.localeCompare(b.s.name));
+  const noNumNames = [...new Set(noNum.filter(s => !by.has(s.id)).map(s => s.name))];
   const missing = students.filter(s => !by.has(s.id)).map(s => s.name);
   const newTotal = m => mode === "add" ? (m.s.totalXp || 0) + m.xp : Math.max(0, m.xp);
   $("#pasteOut").innerHTML =
     `<p><strong>Found ${pasteResult.length} of your ${students.length} students.</strong> ${ignored} other name${ignored === 1 ? "" : "s"} ignored.</p>` +
-    (pasteResult.length ? `<table class="ptable"><tr><th>Student</th><th>XP now</th><th>${mode === "add" ? "Adding" : "Setting to"}</th><th>New total</th></tr>` +
-      pasteResult.map(m => `<tr><td>${esc(m.s.name)}</td><td>${m.s.totalXp || 0}</td><td>${m.xp}</td><td><strong>${newTotal(m)}</strong></td></tr>`).join("") + `</table>` : "") +
+    (pasteResult.length ? `<table class="ptable"><tr><th>Student</th><th>XP now</th><th>Read from</th><th>${mode === "add" ? "Adding" : "Setting to"}</th><th>New total</th></tr>` +
+      pasteResult.map(m => `<tr><td>${esc(m.s.name)}</td><td>${m.s.totalXp || 0}</td><td class="muted">${esc(m.src)}</td><td>${m.xp}</td><td><strong>${newTotal(m)}</strong></td></tr>`).join("") + `</table>` : "") +
     (dups.size ? `<p class="pwarn">These students appear more than once, so the last one was used: ${esc([...dups].join(", "))}</p>` : "") +
-    (noNum.length ? `<p class="pwarn">No number found next to: ${esc(noNum.join(", "))}</p>` : "") +
+    (noNumNames.length ? `<p class="pwarn">No number found next to: ${esc(noNumNames.join(", "))}</p>` : "") +
     (ambiguous.length ? `<p class="pwarn">Skipped because it was unclear who they are: ${esc(ambiguous.slice(0, 5).join("; "))}</p>` : "") +
     (missing.length && pasteResult.length ? `<p class="muted">Not found in this paste: ${esc(missing.join(", "))}</p>` : "") +
     (mode === "add" ? `<p class="muted">Adding stacks onto what they have, so only apply each day's paste once.</p>` : "");

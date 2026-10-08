@@ -179,7 +179,7 @@ import { doc, collection, onSnapshot, updateDoc, increment, arrayUnion, arrayRem
 
 window.__loaded = true;
 const $ = s => document.querySelector(s);
-const VERSION = "v5 plain-saves";
+const VERSION = "v6 daily-xp";
 const id = new URLSearchParams(location.search).get("s");
 const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const RANK = { Legendary: 0, Epic: 1, Rare: 2, Common: 3 };
@@ -261,7 +261,9 @@ async function commitPull(pick) {
     const todayCount = s.pullsDay === day ? (s.pullsToday || 0) : 0;      // pulls made so far today
     const block = Math.floor(todayCount / info.ppr);                      // each 120 XP worth of pulls is its own round of keeps
     const item = { u: Math.random().toString(36).slice(2, 10), id: pick.id, day, block, rk: `d${day}b${block}` };
-    await updateDoc(ref, { pullsUsed: increment(1), pullsDay: day, pullsToday: todayCount + 1, tray: arrayUnion(item), lastPull: Date.now() });
+    const patch = { pullsDay: day, pullsToday: todayCount + 1, tray: arrayUnion(item), lastPull: Date.now() };
+    if (info.carry > 0) patch.carry = increment(-1); else patch.pullsUsed = increment(1);   // pulls kept from earlier days are spent first
+    await updateDoc(ref, patch);
     return { kind: "tray", item, left: info.total - 1 };
   }
   if (info.bonus > 0) {

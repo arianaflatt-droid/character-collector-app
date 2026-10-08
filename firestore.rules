@@ -30,9 +30,10 @@ service cloud.firestore {
       // Everything else (XP, series, name, bonus pulls) is yours alone.
       allow update: if isTeacher() || (
         request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['pullsUsed', 'bonusUsed', 'tray', 'collection', 'keeps', 'lastPull'])
+          .hasOnly(['pullsUsed', 'pullsDay', 'pullsToday', 'carry', 'bonusUsed', 'tray', 'collection', 'keeps', 'lastPull'])
         && request.resource.data.get('pullsUsed', 0) >= resource.data.get('pullsUsed', 0)
         && request.resource.data.get('bonusUsed', 0) >= resource.data.get('bonusUsed', 0)
+        && request.resource.data.get('carry', 0) <= resource.data.get('carry', 0)
       );
     }
   }

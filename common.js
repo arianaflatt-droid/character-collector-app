@@ -13,10 +13,13 @@ export const DEFAULT_KEEPS = 3;           // how many pulls a student may keep p
 
 // settings = { xpPerPull, roundXp, keepsPerRound }
 export function pullInfo(s, st) {
-  const ppr = Math.max(1, Math.floor((st.roundXp || DEFAULT_ROUND_XP) / (st.xpPerPull || DEFAULT_XP_PER_PULL))); // pulls per round
-  const earned = Math.max(0, Math.floor((s.totalXp || 0) / (st.xpPerPull || DEFAULT_XP_PER_PULL)) - (s.pullsUsed || 0));
-  const bonus = Math.max(0, (s.bonusPulls || 0) - (s.bonusUsed || 0)); // teacher-given pulls, kept automatically
-  return { ppr, earned, bonus, total: earned + bonus };
+  const per = st.xpPerPull || DEFAULT_XP_PER_PULL;
+  const ppr = Math.max(1, Math.floor((st.roundXp || DEFAULT_ROUND_XP) / per)); // pulls per round
+  const fromXp = Math.max(0, Math.floor((s.totalXp || 0) / per) - (s.pullsUsed || 0)); // pulls earned with today's XP and not used yet
+  const carry = Math.max(0, s.carry || 0);                                              // unused pulls kept from earlier days
+  const bonus = Math.max(0, (s.bonusPulls || 0) - (s.bonusUsed || 0));                  // teacher-given pulls, kept automatically
+  const earned = fromXp + carry;
+  return { ppr, earned, fromXp, carry, bonus, total: earned + bonus };
 }
 
 // total pulls ready (earned + bonus); used by the teacher page
