@@ -34,6 +34,8 @@
   .srow{border:2px solid var(--line);border-radius:14px;padding:12px;margin-top:10px}
   .shead{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
   .sname{font-size:1.1rem;min-width:140px}
+  .serieshead{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:8px}
+  .serieshead .btn{padding:4px 12px}
   .pulls{font-weight:700;color:#12805a;min-width:90px}
   .xpin{width:90px}
   .note{background:#fff8da;border:2px solid var(--sun);border-radius:12px;padding:10px 14px;margin:10px 0;font-weight:600}
@@ -188,6 +190,11 @@
           <button class="btn alt" id="bulkOff">Turn off</button>
           <span class="status" id="bulkStatus"></span>
         </div>
+        <div class="row">
+          <button class="btn alt" id="openAll">Show all series</button>
+          <button class="btn alt" id="closeAll">Hide all series</button>
+          <input type="text" id="seriesFind" placeholder="Find a series" aria-label="Find a series">
+        </div>
         <div id="studentList"></div>
       </div>
     </section>
@@ -269,7 +276,7 @@ const $ = s => document.querySelector(s);
 let students = [], chars = [], settings = { xpPerPull: DEFAULT_XP_PER_PULL, roundXp: DEFAULT_ROUND_XP, keepsPerRound: DEFAULT_KEEPS, weights: { ...DEFAULT_WEIGHTS }, day: 1, dayStartedAt: 0 };
 const selected = new Set();
 let parsedRows = [];
-const keepSet = new Set();
+const keepSet = new Set(), openRows = new Set();   // openRows = students whose series list is showing
 let pasteResult = [], lastPaste = null;
 
 /* Google sign-in */
@@ -327,12 +334,14 @@ const say = (sel, t) => { $(sel).textContent = t; };
 
 /* ---------- students ---------- */
 function renderStudents() {
-  const series = allSeries();
+  const series = allSeries(), q = norm($("#seriesFind").value), shownSeries = series.filter(sr => !q || norm(sr).includes(q));
   const cur = $("#bulkSeries").value;
-  $("#bulkSeries").innerHTML = series.map(s => `<option>${esc(s)}</option>`).join("");
-  if (series.includes(cur)) $("#bulkSeries").value = cur;
+  $("#bulkSeries").innerHTML = shownSeries.map(s => `<option>${esc(s)}</option>`).join("");
+  if (shownSeries.includes(cur)) $("#bulkSeries").value = cur;
   $("#studentList").innerHTML = students.length ? students.map(s => {
     const en = s.enabledSeries || [], info = pullInfo(s, settings), avail = info.total, waiting = (s.tray || []).length;
+    const open = openRows.has(s.id), on = series.filter(sr => en.includes(sr));
+    const summary = on.length ? "On: " + on.slice(0, 4).join(", ") + (on.length > 4 ? `, +${on.length - 4} more` : "") : "No series on yet";
     return `<div class="srow" data-id="${s.id}">
       <div class="shead">
         <input type="checkbox" class="sel" ${selected.has(s.id) ? "checked" : ""} aria-label="Select ${esc(s.name)}">
@@ -344,7 +353,8 @@ function renderStudents() {
         <button class="btn alt copy">Copy link</button>
         <button class="btn danger del">Remove</button>
       </div>
-      <div class="chips">${series.length ? series.map(sr => `<button class="chip ${en.includes(sr) ? "on" : ""}" data-series="${esc(sr)}" aria-pressed="${en.includes(sr)}">${esc(sr)}</button>`).join("") : '<span class="muted">Add characters to create series.</span>'}</div>
+      <div class="serieshead"><button class="btn alt tog" aria-expanded="${open}">${open ? "Hide series ▲" : `Series (${on.length}) ▼`}</button>${open ? "" : `<span class="muted">${esc(summary)}</span>`}</div>
+      ${open ? `<div class="chips">${series.length ? (shownSeries.length ? shownSeries.map(sr => `<button class="chip ${en.includes(sr) ? "on" : ""}" data-series="${esc(sr)}" aria-pressed="${en.includes(sr)}">${esc(sr)}</button>`).join("") : '<span class="muted">No series match that search.</span>') : '<span class="muted">Add characters to create series.</span>'}</div>` : ""}
     </div>`;
   }).join("") : '<p class="muted">No students yet.</p>';
   $("#selAll").checked = students.length > 0 && students.every(s => selected.has(s.id));
@@ -356,6 +366,9 @@ function renderStudents() {
 $("#studentList").addEventListener("click", async e => {
   const row = e.target.closest(".srow"); if (!row) return;
   const id = row.dataset.id, s = students.find(x => x.id === id), ref = doc(db, "students", id);
+  if (e.target.classList.contains("tog")) {
+    openRows.has(id) ? openRows.delete(id) : openRows.add(id); return renderStudents();
+  }
   if (e.target.classList.contains("chip")) {
     const sr = e.target.dataset.series, on = (s.enabledSeries || []).includes(sr);
     await updateDoc(ref, { enabledSeries: on ? arrayRemove(sr) : arrayUnion(sr) });
@@ -387,6 +400,9 @@ async function bulkSeries(on) {
   await b.commit();
   say("#bulkStatus", `${sr} turned ${on ? "on" : "off"} for ${selected.size} student${selected.size === 1 ? "" : "s"}.`);
 }
+$("#openAll").onclick = () => { students.forEach(s => openRows.add(s.id)); renderStudents(); };
+$("#closeAll").onclick = () => { openRows.clear(); renderStudents(); };
+$("#seriesFind").addEventListener("input", renderStudents);
 $("#bulkOn").onclick = () => bulkSeries(true);
 $("#bulkOff").onclick = () => bulkSeries(false);
 
