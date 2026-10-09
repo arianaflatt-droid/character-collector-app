@@ -49,6 +49,8 @@
   .w{width:80px}
   .ptable{border-collapse:collapse;margin:10px 0;font-size:.95rem}
   .ptable th,.ptable td{border-bottom:1px solid var(--line);padding:4px 14px 4px 0;text-align:left}
+  .upill{display:inline-flex;align-items:center;gap:8px;background:#fff8da;border:2px solid var(--sun);border-radius:999px;padding:3px 4px 3px 12px;margin:3px 6px 3px 0;font-weight:700}
+  .upill .btn{padding:2px 10px}
   .pwarn{color:#7a4b00;font-weight:700;margin:4px 0}
 </style>
 </head>
@@ -138,11 +140,11 @@
 
       <div class="box">
         <h2>Paste XP for your class</h2>
-        <p class="muted">Copy the rows from your spreadsheet or report and paste them here. The whole class (or even the whole school) can be in there. For each of your students it reads the number before the slash (like the 105 in "105 / 160"), or the first number after their name if there is no slash. Everyone else is ignored.</p>
+        <p class="muted">Select the whole table on the XP page, copy it, and paste it here. For each student it reads the number before the slash (the 291 in "291 / 120"). Pasting the same day again just updates the numbers, and students who aren't in the paste are left alone.</p>
         <textarea id="pasteBox" placeholder="Paste here. Include the header row if you have one." aria-label="Pasted XP data"></textarea>
         <div id="pasteCfg" hidden>
           <div class="row">
-            <label>Mode <select id="pMode"><option value="add">Add this number to their XP</option><option value="set">Set total XP to this number</option></select></label>
+            <label>Mode <select id="pMode"><option value="set">Set their XP to the pasted number</option><option value="add">Add the pasted number to their XP</option></select></label>
           </div>
           <div id="pasteOut"></div>
           <div class="row">
@@ -167,7 +169,7 @@
             <button class="btn" id="applyXp">Apply XP</button>
           </div>
         </div>
-        <p class="muted" style="margin:6px 0 0">Tip: use "Add" for daily files so XP keeps stacking up toward new rounds. Use "Set" for a running total.</p>
+        <p class="muted" style="margin:6px 0 0">Tip: "Set" replaces their XP with the number in the file. "Add" stacks it on top of what they have.</p>
         <p class="status" id="xpStatus"></p>
       </div>
 
@@ -255,6 +257,7 @@
           <label>Keeps per round <input type="number" class="w" id="sKeeps" min="0"></label>
         </div>
         <p class="muted" id="sSummary" style="margin:4px 0 0"></p>
+        <div class="row"><label><input type="checkbox" id="sPick"> Students can turn series on and off themselves (the "Choose series" tab on their page)</label></div>
         <h2 style="margin-top:14px">Rarity odds</h2>
         <p class="muted">Bigger number means more common. Only rarities a student actually has unlocked are used.</p>
         <div class="row" id="sWeights"></div>
@@ -273,7 +276,7 @@ import { collection, doc, onSnapshot, addDoc, updateDoc, deleteDoc, setDoc, writ
 
 window.__loaded = true;
 const $ = s => document.querySelector(s);
-let students = [], chars = [], settings = { xpPerPull: DEFAULT_XP_PER_PULL, roundXp: DEFAULT_ROUND_XP, keepsPerRound: DEFAULT_KEEPS, weights: { ...DEFAULT_WEIGHTS }, day: 1, dayStartedAt: 0 };
+let students = [], chars = [], settings = { xpPerPull: DEFAULT_XP_PER_PULL, roundXp: DEFAULT_ROUND_XP, keepsPerRound: DEFAULT_KEEPS, weights: { ...DEFAULT_WEIGHTS }, day: 1, dayStartedAt: 0, pick: true };
 const selected = new Set();
 let parsedRows = [];
 const keepSet = new Set(), openRows = new Set();   // openRows = students whose series list is showing
@@ -289,7 +292,7 @@ onAuthStateChanged(auth, u => {
     $("#gate").hidden = true; $("#app").hidden = false; $("#whoEmail").textContent = u.email;
     if (!unsubs.length) start();
   } else {
-    unsubs.forEach(f => f()); unsubs = [];
+    unsubs.forEach(f => f()); unsubs = []; storedSeries = null; charsLoaded = false;
     $("#app").hidden = true; $("#gate").hidden = false; $("#gateOut").hidden = !u;
     $("#gateMsg").textContent = u ? `${u.email} isn't the teacher account for this site.` : "";
   }
@@ -314,15 +317,25 @@ document.querySelectorAll(".tab").forEach(t => t.onclick = () => {
   ["students", "chars", "settings"].forEach(n => $("#tab-" + n).hidden = n !== t.dataset.tab);
 });
 
+let storedSeries = null, charsLoaded = false;   // storedSeries = what is saved in config/series
+function syncSeries() {
+  if (!charsLoaded || storedSeries === null) return;
+  const counts = new Map(); chars.forEach(c => counts.set(c.series, (counts.get(c.series) || 0) + 1));
+  const list = [...counts].map(([name, count]) => ({ name, count })).sort((a, b) => a.name.localeCompare(b.name));
+  if (JSON.stringify(list) === JSON.stringify(storedSeries)) return;
+  storedSeries = list;
+  setDoc(doc(db, "config", "series"), { list, updated: Date.now() }).catch(showErr);
+}
 function start() {
   $("#fbErr").hidden = true;
   $("#cRarity").innerHTML = RARITIES.map(r => `<option>${r}</option>`).join("");
   unsubs = [
     onSnapshot(collection(db, "students"), s => { students = s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => a.name.localeCompare(b.name)); renderStudents(); }, showErr),
-    onSnapshot(collection(db, "characters"), s => { chars = s.docs.map(d => ({ id: d.id, ...d.data() })); renderChars(); renderStudents(); }, showErr),
+    onSnapshot(collection(db, "characters"), s => { chars = s.docs.map(d => ({ id: d.id, ...d.data() })); charsLoaded = true; renderChars(); renderStudents(); syncSeries(); }, showErr),
+    onSnapshot(doc(db, "config", "series"), s => { storedSeries = (s.exists() && s.data().list) || []; syncSeries(); }, showErr),
     onSnapshot(doc(db, "config", "main"), s => {
       const d = s.exists() ? s.data() : {};
-      settings = { xpPerPull: Number(d.xpPerPull) || DEFAULT_XP_PER_PULL, roundXp: Number(d.roundXp) || DEFAULT_ROUND_XP, keepsPerRound: d.keepsPerRound === undefined ? DEFAULT_KEEPS : Math.max(0, Number(d.keepsPerRound)), weights: { ...DEFAULT_WEIGHTS, ...(d.weights || {}) }, day: Number(d.day) || 1, dayStartedAt: Number(d.dayStartedAt) || 0 };
+      settings = { xpPerPull: Number(d.xpPerPull) || DEFAULT_XP_PER_PULL, roundXp: Number(d.roundXp) || DEFAULT_ROUND_XP, keepsPerRound: d.keepsPerRound === undefined ? DEFAULT_KEEPS : Math.max(0, Number(d.keepsPerRound)), weights: { ...DEFAULT_WEIGHTS, ...(d.weights || {}) }, day: Number(d.day) || 1, dayStartedAt: Number(d.dayStartedAt) || 0, pick: d.studentsPickSeries !== false };
       renderSettings(); renderStudents(); renderDay();
     }, showErr)
   ];
@@ -557,39 +570,108 @@ function readRecord(rec) {
   return { xp, src, key, text: rec.first };
 }
 
+// --- Reads the table copied from the XP page (the same parser your other app uses) ---
+const PASTE_HEADERS = ["Social Studies", "Science", "Vocabulary", "Language", "Writing", "Reading", "FastMath", "Math", "Total", "Student"];
+// Returns [{ name: "Jenesis Freitag", completed: 291 }, ...]. "291 / 120101" -> 291; the name is the nearest line above with letters.
+function parsePasted(text) {
+  const lines = String(text || "").replace(/\r/g, "").split(/[\n\t]/)
+    .map(x => x.replace(/\u00a0/g, " ").replace(/[\u2195\u21C5\u2191\u2193\u25B2\u25BC\u2303\u2304]/g, "").trim());
+  const out = [];
+  lines.forEach((ln, i) => {
+    const m = ln.match(/^(\d[\d,]*)\s*\/\s*\d/);
+    if (!m) return;
+    let j = i - 1; while (j >= 0 && (!/[A-Za-z]/.test(lines[j]) || lines[j].includes("@"))) j--;   // skips blank lines, numbers, and email lines
+    if (j < 0) return;
+    let name = lines[j];
+    // the first name is glued to the header row: cut off everything up to the last header word
+    PASTE_HEADERS.forEach(hd => { const k = name.lastIndexOf(hd); if (k >= 0 && /^[A-Z]/.test(name.slice(k + hd.length))) name = name.slice(k + hd.length); });
+    name = name.replace(/\s+/g, " ").trim();
+    if (name && !/^\d/.test(name)) out.push({ name, completed: Number(m[1].replace(/,/g, "")) });
+  });
+  return out;
+}
+const firstLast = x => { x = String(x || "").trim().replace(/\s+/g, " "); if (x.includes(",")) { const i = x.indexOf(","); return (x.slice(i + 1).trim() + " " + x.slice(0, i).trim()).trim(); } return x; };
+const normName = x => firstLast(x).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9 '\-]/g, "").replace(/\s+/g, " ").trim();
+// Match a pasted name to exactly one student, in this order. If two students fit, don't guess.
+function matchStudent(pastedName, roster) {
+  const f = normName(pastedName), ft = f.split(" "), fFirst = ft[0], fLast = ft.length > 1 ? ft[ft.length - 1] : "";
+  if (!f) return null;
+  const R = roster.map(s => { const n = normName(s.name), tt = n.split(" "); return { s, n, first: tt[0], last: tt.length > 1 ? tt[tt.length - 1] : "" }; });
+  const tiers = [
+    r => r.n === f,                                                                      // exact full name
+    r => fLast && r.last && r.first === fFirst && r.last === fLast,                      // same first + last (middle names ignored)
+    r => fLast && r.last.length === 1 && r.first === fFirst && fLast[0] === r.last,      // roster has "Maya J."
+    r => !r.last && r.first === fFirst && R.filter(x => x.first === fFirst).length === 1  // roster has first name only
+  ];
+  for (const test of tiers) { const m = R.filter(test); if (m.length === 1) return m[0].s; if (m.length > 1) return null; }
+  return null;
+}
+let pasteUnknown = [];   // names in the paste that aren't on your list yet
+
 function previewPaste() {
   const text = $("#pasteBox").value;
   $("#pasteCfg").hidden = !text.trim();
-  if (!text.trim()) { pasteResult = []; return; }
-  const mode = $("#pMode").value, by = new Map(); let ignored = 0; const ambiguous = [], dups = new Set(), noNum = [];
-  for (const rec of readRecords(text)) {
-    if (!rec.hits.length) { if (rec.lines.some(l => /\d/.test(l))) ignored++; continue; }
-    if (rec.hits.length > 1) { ambiguous.push(rec.first.slice(0, 40)); continue; }
-    const r = readRecord(rec);
-    if (!isFinite(r.xp)) { noNum.push(rec.hits[0]); continue; }
-    const e = by.get(rec.hits[0].id) || { s: rec.hits[0], rows: [] };
-    e.rows.push(r); by.set(rec.hits[0].id, e);
+  if (!text.trim()) { pasteResult = []; pasteUnknown = []; return; }
+  const mode = $("#pMode").value, by = new Map(), ambiguous = [], noNum = []; let ignored = 0;
+  pasteUnknown = [];
+  const parsed = parsePasted(text);
+  if (parsed.length) {                                     // the table from the XP page
+    for (const r of parsed) {
+      const s = matchStudent(r.name, students);
+      if (!s) {
+        const first = normName(r.name).split(" ")[0];
+        if (!normName(r.name).includes(" ") && students.filter(x => normName(x.name).split(" ")[0] === first).length > 1) { ambiguous.push(`${r.name} (${r.completed}) could be more than one of your students. Use their full name.`); continue; }
+        const u = pasteUnknown.find(x => normName(x.name) === normName(r.name));
+        if (u) u.xp = Math.max(u.xp, r.completed); else pasteUnknown.push({ name: r.name, xp: r.completed });
+        continue;
+      }
+      const e = by.get(s.id) || { s, rows: [] };
+      e.rows.push({ xp: r.completed, key: normName(r.name), text: r.name }); by.set(s.id, e);
+    }
+  } else {                                                 // other layouts: one row per student, like "Maya Lopez 120" or spreadsheet rows
+    for (const rec of readRecords(text)) {
+      if (!rec.hits.length) { if (rec.lines.some(l => /\d/.test(l))) ignored++; continue; }
+      if (rec.hits.length > 1) { ambiguous.push(rec.first.slice(0, 40)); continue; }
+      const r = readRecord(rec);
+      if (!isFinite(r.xp)) { noNum.push(rec.hits[0]); continue; }
+      const e = by.get(rec.hits[0].id) || { s: rec.hits[0], rows: [] };
+      e.rows.push({ xp: r.xp, key: r.key, text: r.text }); by.set(rec.hits[0].id, e);
+    }
   }
+  const dups = new Set();
   for (const [id, e] of [...by]) {
     if (new Set(e.rows.map(x => x.key)).size > 1) { ambiguous.push(`${e.s.name} could be ${[...new Set(e.rows.map(x => x.text))].slice(0, 3).join(" or ")}. Add their full name to your list.`); by.delete(id); continue; }
     if (e.rows.length > 1) dups.add(e.s.name);
-    e.xp = e.rows[e.rows.length - 1].xp; e.src = e.rows[e.rows.length - 1].src;
+    e.xp = Math.max(...e.rows.map(x => x.xp));              // a student listed twice keeps their highest number
   }
   pasteResult = [...by.values()].sort((a, b) => a.s.name.localeCompare(b.s.name));
   const noNumNames = [...new Set(noNum.filter(s => !by.has(s.id)).map(s => s.name))];
   const missing = students.filter(s => !by.has(s.id)).map(s => s.name);
   const newTotal = m => mode === "add" ? (m.s.totalXp || 0) + m.xp : Math.max(0, m.xp);
   $("#pasteOut").innerHTML =
-    `<p><strong>Found ${pasteResult.length} of your ${students.length} students.</strong> ${ignored} other name${ignored === 1 ? "" : "s"} ignored.</p>` +
-    (pasteResult.length ? `<table class="ptable"><tr><th>Student</th><th>XP now</th><th>Read from</th><th>${mode === "add" ? "Adding" : "Setting to"}</th><th>New total</th></tr>` +
-      pasteResult.map(m => `<tr><td>${esc(m.s.name)}</td><td>${m.s.totalXp || 0}</td><td class="muted">${esc(m.src)}</td><td>${m.xp}</td><td><strong>${newTotal(m)}</strong></td></tr>`).join("") + `</table>` : "") +
-    (dups.size ? `<p class="pwarn">These students appear more than once, so the last one was used: ${esc([...dups].join(", "))}</p>` : "") +
+    `<p><strong>${pasteResult.length} of your ${students.length} students found in the paste.</strong>` +
+    (pasteUnknown.length ? ` ${pasteUnknown.length} name${pasteUnknown.length === 1 ? " isn't" : "s aren't"} on your list.` : "") +
+    (ignored ? ` ${ignored} other name${ignored === 1 ? "" : "s"} ignored.` : "") + `</p>` +
+    (pasteResult.length ? `<table class="ptable"><tr><th>Student</th><th>XP now</th><th>In the paste</th><th>${mode === "add" ? "Adding" : "Setting to"}</th><th>New total</th></tr>` +
+      pasteResult.map(m => `<tr><td>${esc(m.s.name)}</td><td>${m.s.totalXp || 0}</td><td class="muted">${m.xp}</td><td>${m.xp}</td><td><strong>${newTotal(m)}</strong></td></tr>`).join("") + `</table>` : "") +
+    (pasteUnknown.length ? `<p class="pwarn" style="margin-bottom:2px">Not on your list yet:</p><div>` +
+      pasteUnknown.map(u => `<span class="upill">${esc(u.name)} · ${u.xp}<button class="btn alt addstu" data-name="${esc(u.name)}">Add</button></span>`).join("") +
+      (pasteUnknown.length > 1 ? ` <button class="btn alt addall">Add all ${pasteUnknown.length}</button>` : "") + `</div>` : "") +
+    (dups.size ? `<p class="pwarn">These students appear more than once, so their highest number was used: ${esc([...dups].join(", "))}</p>` : "") +
     (noNumNames.length ? `<p class="pwarn">No number found next to: ${esc(noNumNames.join(", "))}</p>` : "") +
     (ambiguous.length ? `<p class="pwarn">Skipped because it was unclear who they are: ${esc(ambiguous.slice(0, 5).join("; "))}</p>` : "") +
-    (missing.length && pasteResult.length ? `<p class="muted">Not found in this paste: ${esc(missing.join(", "))}</p>` : "") +
-    (mode === "add" ? `<p class="muted">Adding stacks onto what they have, so only apply each day's paste once.</p>` : "");
+    (missing.length && pasteResult.length ? `<p class="muted">Not in this paste, so their XP stays as it is: ${esc(missing.join(", "))}</p>` : "") +
+    (mode === "add" ? `<p class="muted">Adding stacks onto what they have, so only apply each paste once.</p>` : `<p class="muted">Setting replaces their XP with the pasted number, so pasting the same day again just refreshes it.</p>`);
   $("#pasteApply").disabled = !pasteResult.length;
 }
+// "Add" next to a name that isn't on your list yet. They start at 0 XP and then show up in the table above.
+$("#pasteOut").addEventListener("click", async e => {
+  const one = e.target.closest(".addstu"), all = e.target.closest(".addall");
+  if (!one && !all) return;
+  const names = all ? pasteUnknown.map(u => u.name) : [one.dataset.name];
+  try { for (const n of names) await addDoc(collection(db, "students"), newStudent(firstLast(n))); }
+  catch { say("#pasteStatus", "Couldn't add them. Check your connection and try again."); }
+});
 $("#pasteBox").addEventListener("input", previewPaste);
 $("#pMode").addEventListener("change", previewPaste);
 $("#pasteClear").onclick = () => { $("#pasteBox").value = ""; previewPaste(); say("#pasteStatus", ""); };
@@ -738,14 +820,14 @@ $("#charList").addEventListener("click", async e => {
 /* ---------- settings ---------- */
 function renderSettings() {
   if (document.activeElement && document.activeElement.tagName === "INPUT" && $("#tab-settings").contains(document.activeElement)) return;
-  $("#sXp").value = settings.xpPerPull; $("#sRound").value = settings.roundXp; $("#sKeeps").value = settings.keepsPerRound;
+  $("#sPick").checked = settings.pick; $("#sXp").value = settings.xpPerPull; $("#sRound").value = settings.roundXp; $("#sKeeps").value = settings.keepsPerRound;
   const ppr = Math.max(1, Math.floor(settings.roundXp / settings.xpPerPull));
   $("#sSummary").textContent = `Every ${settings.roundXp} XP is a round: ${ppr} pulls, and students keep ${settings.keepsPerRound} of them.`;
   $("#sWeights").innerHTML = RARITIES.map(r => `<label>${r} <input type="number" class="w wt" data-r="${r}" min="0" value="${settings.weights[r]}"></label>`).join("");
 }
 $("#saveSettings").onclick = async () => {
   const weights = {}; document.querySelectorAll(".wt").forEach(i => weights[i.dataset.r] = Math.max(0, Number(i.value) || 0));
-  await setDoc(doc(db, "config", "main"), { xpPerPull: Math.max(1, Number($("#sXp").value) || DEFAULT_XP_PER_PULL), roundXp: Math.max(1, Number($("#sRound").value) || DEFAULT_ROUND_XP), keepsPerRound: Math.max(0, Number($("#sKeeps").value)), weights }, { merge: true });
+  await setDoc(doc(db, "config", "main"), { xpPerPull: Math.max(1, Number($("#sXp").value) || DEFAULT_XP_PER_PULL), roundXp: Math.max(1, Number($("#sRound").value) || DEFAULT_ROUND_XP), keepsPerRound: Math.max(0, Number($("#sKeeps").value)), studentsPickSeries: $("#sPick").checked, weights }, { merge: true });
   say("#sStatus", "Saved.");
 };
 </script>

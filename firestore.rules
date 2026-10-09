@@ -26,14 +26,15 @@ service cloud.firestore {
       allow list: if isTeacher();
       allow create, delete: if isTeacher();
 
-      // Students can only change pull/keep data, and can't turn their used-pull counts back down.
-      // Everything else (XP, series, name, bonus pulls) is yours alone.
+      // Students can change their pull/keep data and which series they have turned on, and they can't turn their used-pull counts back down.
+      // Everything else (XP, name, bonus pulls) is yours alone.
       allow update: if isTeacher() || (
         request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['pullsUsed', 'pullsDay', 'pullsToday', 'carry', 'bonusUsed', 'tray', 'collection', 'keeps', 'lastPull'])
+          .hasOnly(['pullsUsed', 'pullsDay', 'pullsToday', 'carry', 'bonusUsed', 'tray', 'collection', 'keeps', 'enabledSeries', 'lastPull'])
         && request.resource.data.get('pullsUsed', 0) >= resource.data.get('pullsUsed', 0)
         && request.resource.data.get('bonusUsed', 0) >= resource.data.get('bonusUsed', 0)
         && request.resource.data.get('carry', 0) <= resource.data.get('carry', 0)
+        && request.resource.data.get('enabledSeries', []) is list
       );
     }
   }

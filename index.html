@@ -53,6 +53,20 @@
   .btn:disabled{opacity:.45;cursor:not-allowed;box-shadow:none}
   .daybanner{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;background:var(--sun);border:3px solid var(--ink);border-radius:14px;padding:10px 14px;margin-bottom:20px;font-weight:800;box-shadow:0 4px 0 var(--ink)}
   .daybanner .btn{padding:6px 14px;box-shadow:0 3px 0 var(--ink)}
+  .tabs{display:flex;gap:8px;margin:0 0 18px;flex-wrap:wrap}
+  .tabbtn{border:3px solid var(--ink);background:#fff;color:var(--ink);font-family:var(--display);font-weight:800;font-size:1.05rem;border-radius:12px;padding:8px 20px}
+  .tabbtn[aria-selected="true"]{background:var(--sun);box-shadow:0 4px 0 var(--ink)}
+  .serbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:14px 0}
+  .serbar input{border:3px solid var(--line);border-radius:12px;padding:8px 12px;font:inherit;min-width:200px;flex:1;max-width:320px}
+  .filters{display:flex;gap:6px}
+  .filters button{border:2px solid var(--line);background:#fff;color:var(--ink);font-weight:800;border-radius:999px;padding:5px 14px}
+  .filters button[aria-pressed="true"]{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .sergrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px}
+  .sertile{display:flex;align-items:center;justify-content:space-between;gap:10px;text-align:left;border:3px solid var(--line);background:#fff;color:var(--ink);border-radius:14px;padding:12px 14px;font:inherit;font-weight:800;min-height:64px}
+  .sertile small{display:block;font-weight:700;color:var(--muted);margin-top:2px}
+  .sertile .sw{flex:none;min-width:52px;text-align:center;border-radius:999px;border:2px solid var(--line);padding:3px 10px;font-size:.85rem;color:var(--muted);background:#f4f1fb}
+  .sertile[aria-pressed="true"]{border-color:var(--ink);background:#e9f9f1;box-shadow:0 3px 0 var(--ink)}
+  .sertile[aria-pressed="true"] .sw{background:var(--mint);color:#fff;border-color:var(--ink)}
   .ver{margin:28px 0 0;text-align:center;font-size:.75rem;color:var(--muted);opacity:.7}
   .roundtext{margin:6px 0 0;font-weight:700;color:var(--muted)}
   .trayBox{margin-top:26px;background:#fff8e1;border:3px solid var(--sun);border-radius:18px;padding:16px 18px 20px}
@@ -145,13 +159,31 @@
         <p class="packcap" id="packSub"></p>
       </div>
     </section>
+    <div class="tabs" id="tabs" role="tablist" hidden>
+      <button class="tabbtn" role="tab" data-tab="cards" aria-selected="true">My cards</button>
+      <button class="tabbtn" role="tab" data-tab="series" aria-selected="false">Choose series</button>
+    </div>
     <div class="msg" id="msg">Loading your binder…</div>
-    <section class="trayBox" id="trayBox" hidden>
-      <h2>Pick your keepers!</h2>
-      <p class="hint">You can only keep some of your pulls each round. Keep your favorites and release the rest.</p>
-      <div id="tray"></div>
+    <div id="cardsPanel">
+      <section class="trayBox" id="trayBox" hidden>
+        <h2>Pick your keepers!</h2>
+        <p class="hint">You can only keep some of your pulls each round. Keep your favorites and release the rest.</p>
+        <div id="tray"></div>
+      </section>
+      <div id="binder"></div>
+    </div>
+    <section id="seriesPanel" hidden>
+      <h2 style="font-size:1.6rem">Choose your series</h2>
+      <p class="hint" style="margin:4px 0 0;font-weight:700;color:var(--muted)">Turn on the series you want to pull cards from. You can change your mind any time, and cards you already kept stay in your binder.</p>
+      <div class="serbar">
+        <input type="text" id="serFind" placeholder="Find a series" aria-label="Find a series">
+        <div class="filters" id="serFilters">
+          <button data-f="all" aria-pressed="true">All</button><button data-f="on" aria-pressed="false">On</button><button data-f="off" aria-pressed="false">Off</button>
+        </div>
+        <strong id="serCount"></strong>
+      </div>
+      <div class="sergrid" id="serGrid"></div>
     </section>
-    <div id="binder"></div>
     <p class="ver" id="ver"></p>
   </main>
 </div>
@@ -179,12 +211,13 @@ import { doc, collection, onSnapshot, updateDoc, increment, arrayUnion, arrayRem
 
 window.__loaded = true;
 const $ = s => document.querySelector(s);
-const VERSION = "v6 daily-xp";
+const VERSION = "v7 student-series";
 const id = new URLSearchParams(location.search).get("s");
 const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const RANK = { Legendary: 0, Epic: 1, Rare: 2, Common: 3 };
 let student = null, chars = [], pulling = false, current = null, pullError = ""; // current = pull being shown in the reveal
-let settings = { xpPerPull: DEFAULT_XP_PER_PULL, roundXp: DEFAULT_ROUND_XP, keepsPerRound: DEFAULT_KEEPS, weights: DEFAULT_WEIGHTS, day: 1 };
+let settings = { xpPerPull: DEFAULT_XP_PER_PULL, roundXp: DEFAULT_ROUND_XP, keepsPerRound: DEFAULT_KEEPS, weights: DEFAULT_WEIGHTS, day: 1, pick: true };
+let seriesList = [], tab = "cards", serFilter = "all";   // seriesList = every series that exists: [{ name, count }]
 
 function setMsg(t) { $("#msg").hidden = !t; $("#msg").textContent = t || ""; }
 let toastTimer;
@@ -239,10 +272,16 @@ function startListeners() {
       roundXp: Number(d.roundXp) || DEFAULT_ROUND_XP,
       keepsPerRound: d.keepsPerRound === undefined ? DEFAULT_KEEPS : Math.max(0, Number(d.keepsPerRound)),
       weights: { ...DEFAULT_WEIGHTS, ...(d.weights || {}) },
-      day: Number(d.day) || 1
+      day: Number(d.day) || 1,
+      pick: d.studentsPickSeries !== false
     };
     render();
   });
+  onSnapshot(doc(db, "config", "series"), snap => { seriesList = (snap.exists() && snap.data().list) || []; render(); });
+}
+// A student turns a series on or off for themselves.
+async function toggleSeries(name, on) {
+  await updateDoc(doc(db, "students", id), { enabledSeries: on ? arrayUnion(name) : arrayRemove(name) });
 }
 async function fetchChar(cid) {
   const snap = await getDoc(doc(db, "characters", cid));
@@ -326,7 +365,12 @@ function render() {
 
   renderTray();
 
-  if (!pool.length) { setMsg("Your teacher hasn't turned on any character series for you yet."); $("#binder").innerHTML = ""; return; }
+  $("#tabs").hidden = !settings.pick;
+  if (!settings.pick && tab === "series") tab = "cards";
+  $("#cardsPanel").hidden = tab !== "cards"; $("#seriesPanel").hidden = tab !== "series";
+  document.querySelectorAll(".tabbtn").forEach(b => b.setAttribute("aria-selected", b.dataset.tab === tab));
+  renderSeriesPanel();
+  if (!pool.length) { setMsg(tab !== "cards" ? pullError : settings.pick ? "You haven't picked any series yet. Open the Choose series tab to turn some on!" : "Your teacher hasn't turned on any character series for you yet."); $("#binder").innerHTML = ""; return; }
   setMsg(pullError);
   const groups = (student.enabledSeries || []).filter(s => pool.some(c => c.series === s));
   $("#binder").innerHTML = groups.map(s => {
@@ -336,6 +380,25 @@ function render() {
       list.map(c => cardHTML(c, coll[c.id] || 0, !(coll[c.id] > 0))).join("") + `</div></section>`;
   }).join("");
 }
+
+function renderSeriesPanel() {
+  if (tab !== "series" || !student) return;
+  const on = new Set(student.enabledSeries || []), q = (document.getElementById("serFind").value || "").toLowerCase().trim();
+  const list = seriesList.filter(x => (!q || x.name.toLowerCase().includes(q)) && (serFilter === "all" || (serFilter === "on") === on.has(x.name)));
+  $("#serCount").textContent = `${[...on].filter(n => seriesList.some(x => x.name === n)).length} on`;
+  document.querySelectorAll("#serFilters button").forEach(b => b.setAttribute("aria-pressed", b.dataset.f === serFilter));
+  $("#serGrid").innerHTML = !seriesList.length ? '<p class="muted">No series yet. Ask your teacher to open the teacher page once so they show up here.</p>'
+    : list.length ? list.map(x => `<button class="sertile" data-name="${esc(x.name)}" aria-pressed="${on.has(x.name)}"><span>${esc(x.name)}<small>${x.count} card${x.count === 1 ? "" : "s"}</small></span><span class="sw">${on.has(x.name) ? "ON" : "OFF"}</span></button>`).join("")
+    : '<p class="muted">Nothing matches that.</p>';
+}
+document.querySelectorAll(".tabbtn").forEach(b => b.addEventListener("click", () => { tab = b.dataset.tab; render(); }));
+document.getElementById("serFind").addEventListener("input", renderSeriesPanel);
+document.getElementById("serFilters").addEventListener("click", e => { const b = e.target.closest("button"); if (b) { serFilter = b.dataset.f; renderSeriesPanel(); } });
+document.getElementById("serGrid").addEventListener("click", async e => {
+  const t = e.target.closest(".sertile"); if (!t || !student) return;
+  const name = t.dataset.name, isOn = (student.enabledSeries || []).includes(name);
+  try { await toggleSeries(name, !isOn); } catch { toast("That didn't save. Try again."); }
+});
 
 function renderTray() {
   const tray = student.tray || [], K = settings.keepsPerRound;
